@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1785016800000,
+      "tag": "0000_pagelea_commerce",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1785021600000,
+      "tag": "0001_pagelea_payment_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785081600000,
+      "tag": "0002_remove_consumer_commerce",
+      "breakpoints": true
+    }
+  ]
+}

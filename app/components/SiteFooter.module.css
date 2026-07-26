@@ -1,0 +1,164 @@
+.footer {
+  border-top: 1px solid var(--line);
+  background: #17221e;
+  color: #e7ede8;
+}
+
+.inner {
+  display: grid;
+  grid-template-columns: 1.2fr 0.7fr 1.7fr 0.75fr;
+  gap: 56px;
+  padding-block: 72px 54px;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.4rem;
+}
+
+.brand > span {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 10px 10px 17px;
+  background: var(--mint);
+  color: var(--ink);
+  font-weight: 900;
+  transform: rotate(-3deg);
+}
+
+.brandColumn p {
+  max-width: 270px;
+  margin: 24px 0 18px;
+  color: #aebbb4;
+  font-size: 0.9rem;
+}
+
+.contact {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--mint);
+  font-size: 0.88rem;
+  font-weight: 720;
+}
+
+.brandColumn small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 46px;
+  color: #718078;
+  font-size: 0.73rem;
+}
+
+.linkColumn,
+.toolsColumn,
+.languageColumn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+.inner h2 {
+  margin: 0 0 10px;
+  color: #718078;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.inner a:not(.brand, .contact) {
+  color: #d5ddd8;
+  font-size: 0.78rem;
+}
+
+.inner a:not(.brand, .contact):hover {
+  color: var(--mint);
+}
+
+.secondaryHeading {
+  margin-top: 22px !important;
+}
+
+.toolsColumn > div {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 22px;
+}
+
+.languagePill {
+  display: block;
+  width: 100%;
+  border: 1px solid #35423c;
+  border-radius: 12px;
+  background: #202e28;
+  padding: 11px 12px;
+  color: #d5ddd8;
+  text-align: left;
+  font-size: 0.8rem;
+}
+
+.languageColumn p {
+  margin: 6px 0 26px;
+  color: #718078;
+  font-size: 0.73rem;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #aebbb4;
+  font-size: 0.72rem;
+}
+
+.status span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #67dc9c;
+  box-shadow: 0 0 0 4px rgba(103, 220, 156, 0.12);
+}
+
+.bottom {
+  display: flex;
+  justify-content: space-between;
+  border-top: 1px solid #2c3933;
+  padding-block: 18px 22px;
+  color: #718078;
+  font-size: 0.69rem;
+}
+
+@media (max-width: 980px) {
+  .inner {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .inner {
+    grid-template-columns: 1fr;
+    gap: 38px;
+    padding-block: 54px 42px;
+  }
+
+  .brandColumn small {
+    margin-top: 28px;
+  }
+
+  .toolsColumn > div {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .bottom {
+    flex-direction: column;
+    gap: 5px;
+  }
+}

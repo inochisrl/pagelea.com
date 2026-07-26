@@ -1,0 +1,87 @@
+name: Bug report
+description: Report a reproducible Pagelea defect using synthetic data
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve Pagelea. Do not include confidential
+        documents, personal data, credentials, or undisclosed vulnerabilities.
+        Security reports belong in a private advisory.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and pull requests.
+          required: true
+        - label: I reproduced this on the latest release or current `main`.
+          required: true
+        - label: I am using only synthetic or redistributable files.
+          required: true
+        - label: This is not an undisclosed security vulnerability.
+          required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and its user impact.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Provide exact steps and, if necessary, a minimal synthetic fixture.
+      placeholder: |
+        1. Open …
+        2. Select …
+        3. Export …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Pagelea version
+      description: Release number or commit SHA.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, browser name, and browser version.
+    validations:
+      required: true
+  - type: dropdown
+    id: tool
+    attributes:
+      label: Affected area
+      options:
+        - PDF Editor
+        - Sign PDF
+        - Merge PDF
+        - Organize PDF
+        - Split PDF
+        - Optimize PDF
+        - Images to PDF
+        - Sanitize & Flatten PDF
+        - Website or navigation
+        - Build, tests, or documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or screenshots
+      description: Remove names, paths, document content, tokens, and personal data.
+      render: shell

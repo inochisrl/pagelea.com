@@ -1,0 +1,80 @@
+{
+  "name": "pagelea-pdf-workbench",
+  "version": "0.2.0",
+  "description": "Privacy-first PDF workbench for editing, organizing, and securing documents in the browser.",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "author": "Inochi SRL",
+  "packageManager": "npm@11.17.0",
+  "homepage": "https://pagelea.com",
+  "keywords": [
+    "pdf",
+    "pdf-editor",
+    "privacy",
+    "local-first",
+    "open-source"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/inochisrl/pagelea.com.git"
+  },
+  "bugs": {
+    "url": "https://github.com/inochisrl/pagelea.com/issues"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
+    "build": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
+    "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern public/pdf.worker.min.mjs --ignore-pattern 'public/pdfjs/**'",
+    "typecheck": "tsc --noEmit",
+    "licenses:list": "npm query '*' --json",
+    "licenses:check": "node scripts/check-licenses.mjs",
+    "sbom": "node scripts/generate-sbom.mjs"
+  },
+  "dependencies": {
+    "lucide-react": "^1.26.0",
+    "next": "16.2.11",
+    "pako": "3.0.1",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "6.1.200",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.47.0",
+    "@eslint/js": "10.0.1",
+    "@next/eslint-plugin-next": "16.2.11",
+    "@tailwindcss/postcss": "4.2.1",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "@vitejs/plugin-rsc": "0.5.26",
+    "esbuild": "0.28.1",
+    "eslint": "10.8.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.7.0",
+    "postcss": "8.5.23",
+    "react-server-dom-webpack": "19.2.8",
+    "tailwindcss": "4.2.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.65.0",
+    "vinext": "0.0.50",
+    "vite": "8.1.5",
+    "wrangler": "4.114.0"
+  },
+  "overrides": {
+    "postcss": "8.5.23",
+    "sharp": "0.35.3"
+  },
+  "type": "module",
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "fsevents@2.3.3": true,
+    "workerd@1.20260722.1": true
+  }
+}

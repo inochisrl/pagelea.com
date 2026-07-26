@@ -1,0 +1,329 @@
+.main {
+  background: var(--paper);
+}
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid var(--line);
+  background: var(--mint);
+  padding-block: clamp(86px, 12vw, 150px);
+}
+
+.hero::after {
+  position: absolute;
+  width: 470px;
+  height: 470px;
+  border: 1px solid color-mix(in oklch, var(--green) 26%, transparent);
+  border-radius: 50%;
+  content: "";
+  right: -120px;
+  top: -210px;
+}
+
+.hero > div {
+  position: relative;
+  z-index: 1;
+}
+
+.hero h1 {
+  max-width: 12ch;
+  margin: 22px 0 0;
+  font-size: clamp(4rem, 9vw, 8.8rem);
+  line-height: 0.8;
+}
+
+.hero h1 em {
+  color: var(--green-dark);
+  font-style: normal;
+}
+
+.hero > div > p:last-child {
+  max-width: 63ch;
+  margin: 34px 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.promiseSection {
+  padding-block: clamp(70px, 10vw, 118px);
+}
+
+.promiseGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 26px;
+}
+
+.promiseGrid article {
+  display: flex;
+  min-height: 520px;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 26px 26px 50px;
+  padding: clamp(30px, 5vw, 54px);
+}
+
+.freeCard {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.sourceCard {
+  background: var(--surface);
+}
+
+.cardIcon {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  border-radius: 16px 16px 26px;
+  background: var(--mint);
+  color: var(--green-dark);
+}
+
+.promiseGrid :global(.eyebrow) {
+  margin-top: 34px;
+}
+
+.freeCard :global(.eyebrow) {
+  color: #9fe1c4;
+}
+
+.freeCard h2 {
+  margin: 18px 0 0;
+  font-size: clamp(5rem, 9vw, 8rem);
+  line-height: 0.78;
+}
+
+.freeCard > strong {
+  margin-top: 18px;
+  color: #c9d8d0;
+  font-size: 0.78rem;
+}
+
+.freeCard ul {
+  display: grid;
+  gap: 12px;
+  margin: 32px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.freeCard li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #d9e4de;
+  font-size: 0.78rem;
+}
+
+.freeCard li svg {
+  flex: 0 0 auto;
+  color: #9fe1c4;
+}
+
+.sourceCard h2 {
+  max-width: 9ch;
+  margin: 18px 0 0;
+  font-size: clamp(3.3rem, 6vw, 6rem);
+  line-height: 0.85;
+}
+
+.sourceCard > p:not(:global(.eyebrow)) {
+  max-width: 48ch;
+  margin: 28px 0 0;
+  color: var(--muted);
+  font-size: 0.83rem;
+}
+
+.sourceCard small {
+  max-width: 54ch;
+  margin-top: 28px;
+  color: var(--muted);
+  font-size: 0.67rem;
+}
+
+.primaryAction,
+.secondaryAction {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  align-self: flex-start;
+  border-radius: 999px;
+  padding: 0 20px;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.primaryAction {
+  margin-top: auto;
+  background: var(--mint);
+  color: var(--ink);
+}
+
+.secondaryAction {
+  margin-top: auto;
+  border: 1px solid var(--ink);
+}
+
+.primaryAction:hover,
+.secondaryAction:hover {
+  transform: translateY(-2px);
+}
+
+.limitsNote {
+  margin-top: 24px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-align: center;
+}
+
+.businessSection {
+  border-block: 1px solid var(--line);
+  background: #f3f4ef;
+  padding-block: clamp(72px, 10vw, 120px);
+}
+
+.sectionHeading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.65fr);
+  gap: 28px 60px;
+  align-items: end;
+}
+
+.sectionHeading :global(.eyebrow) {
+  grid-column: 1 / -1;
+}
+
+.sectionHeading h2 {
+  margin: 0;
+  font-size: clamp(3.5rem, 7vw, 7rem);
+  line-height: 0.82;
+}
+
+.sectionHeading > p:last-child {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.businessGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 68px;
+}
+
+.businessGrid article {
+  display: flex;
+  min-height: 310px;
+  flex-direction: column;
+  border: 1px solid #ccd4cd;
+  border-radius: 20px 20px 38px;
+  background: var(--surface);
+  padding: 30px;
+}
+
+.businessGrid article > svg {
+  color: var(--green-dark);
+}
+
+.businessGrid h3 {
+  margin: 28px 0 0;
+  font-size: 2rem;
+}
+
+.businessGrid p {
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.businessGrid a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: auto;
+  color: var(--green-dark);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.businessGrid a:hover {
+  gap: 10px;
+}
+
+.faq {
+  padding-block: clamp(74px, 10vw, 124px);
+}
+
+.faqInner {
+  display: grid;
+  grid-template-columns: 0.8fr 1.2fr;
+  gap: clamp(50px, 9vw, 130px);
+}
+
+.faq h2 {
+  margin: 20px 0 0;
+  font-size: clamp(3.3rem, 6vw, 6rem);
+  line-height: 0.85;
+}
+
+.faq details {
+  border-top: 1px solid var(--line);
+  padding-block: 23px;
+}
+
+.faq details:last-child {
+  border-bottom: 1px solid var(--line);
+}
+
+.faq summary {
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 780;
+}
+
+.faq details p {
+  max-width: 64ch;
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+@media (max-width: 800px) {
+  .promiseGrid,
+  .sectionHeading,
+  .businessGrid,
+  .faqInner {
+    grid-template-columns: 1fr;
+  }
+
+  .promiseGrid article {
+    min-height: 470px;
+  }
+
+  .businessGrid article {
+    min-height: 250px;
+  }
+}
+
+@media (max-width: 520px) {
+  .hero h1 {
+    font-size: 4.2rem;
+  }
+
+  .promiseGrid article {
+    min-height: 0;
+    padding: 28px;
+  }
+
+  .primaryAction,
+  .secondaryAction {
+    margin-top: 38px;
+  }
+}

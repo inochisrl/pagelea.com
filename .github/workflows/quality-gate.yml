@@ -1,0 +1,129 @@
+name: Pagelea quality gate
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pagelea-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Build, test, and audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    env:
+      CI: "true"
+      NEXT_TELEMETRY_DISABLED: "1"
+      WRANGLER_SEND_METRICS: "false"
+
+    steps:
+      - name: Check out the exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Use the minimum supported Node.js version
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      - name: Use the declared npm version
+        run: |
+          npm install --global npm@11.17.0 --ignore-scripts --no-audit --no-fund
+          test "$(npm --version)" = "11.17.0"
+
+      - name: Install the locked dependency graph
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Audit all dependencies
+        run: npm audit --audit-level=low
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=low
+
+      - name: Verify dependency licence metadata
+        run: npm run licenses:check
+
+      - name: Build and run the complete test suite
+        run: npm test
+
+      - name: Generate and validate CycloneDX SBOM
+        run: |
+          npm run --silent sbom > "$RUNNER_TEMP/pagelea-sbom.cdx.json"
+          npm run --silent sbom > "$RUNNER_TEMP/pagelea-sbom-repeat.cdx.json"
+          cmp --silent \
+            "$RUNNER_TEMP/pagelea-sbom.cdx.json" \
+            "$RUNNER_TEMP/pagelea-sbom-repeat.cdx.json"
+          rm "$RUNNER_TEMP/pagelea-sbom-repeat.cdx.json"
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+
+          const packageJson = JSON.parse(
+            fs.readFileSync("package.json", "utf8"),
+          );
+          const sbom = JSON.parse(
+            fs.readFileSync(
+              process.env.RUNNER_TEMP + "/pagelea-sbom.cdx.json",
+              "utf8",
+            ),
+          );
+          const root = sbom.metadata?.component;
+          const expectedReference =
+            `${packageJson.name}@${packageJson.version}`;
+          const expectedPurl =
+            `pkg:npm/${packageJson.name}@${packageJson.version}`;
+          const rootLicenceIds = (root?.licenses ?? [])
+            .map((entry) => entry?.license?.id)
+            .filter(Boolean);
+
+          if (
+            sbom.bomFormat !== "CycloneDX" ||
+            !Array.isArray(sbom.components) ||
+            !Array.isArray(sbom.dependencies) ||
+            sbom.serialNumber !== undefined ||
+            sbom.metadata?.timestamp !== undefined ||
+            root?.type !== "application" ||
+            root?.name !== packageJson.name ||
+            root?.version !== packageJson.version ||
+            root?.["bom-ref"] !== expectedReference ||
+            root?.purl !== expectedPurl ||
+            !sbom.dependencies.some(
+              (dependency) => dependency.ref === expectedReference,
+            ) ||
+            !rootLicenceIds.includes("AGPL-3.0-or-later") ||
+            JSON.stringify(sbom).toLowerCase().includes("sejda-clone")
+          ) {
+            throw new Error("Invalid CycloneDX SBOM");
+          }
+          NODE
+
+      - name: Upload SBOM evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pagelea-cyclonedx-sbom
+          path: ${{ runner.temp }}/pagelea-sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Reject whitespace errors and tracked-file drift
+        run: |
+          git diff --check
+          git diff --exit-code

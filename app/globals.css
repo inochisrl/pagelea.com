@@ -1,0 +1,229 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #17221e;
+  --muted: #68726e;
+  --paper: #fbfaf6;
+  --cream: #f2eadf;
+  --cream-deep: #e8dac8;
+  --mint: #c8f2df;
+  --green: #0f9f6e;
+  --green-dark: #087a54;
+  --blue: #2d6fe8;
+  --line: #dfe5df;
+  --surface: #ffffff;
+  --shadow-sm: 0 2px 0 rgba(23, 34, 30, 0.06),
+    0 8px 24px rgba(23, 34, 30, 0.06);
+  --shadow-lg: 0 28px 80px rgba(35, 55, 47, 0.14);
+  --radius-sm: 12px;
+  --radius-md: 20px;
+  --radius-lg: 34px;
+  --content: min(1180px, calc(100vw - 40px));
+}
+
+@theme inline {
+  --font-sans: var(--font-body);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  background: var(--paper);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body), sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+  text-rendering: optimizeLegibility;
+}
+
+body:has([data-menu-open="true"]) {
+  overflow: hidden;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  color: inherit;
+}
+
+::selection {
+  background: var(--mint);
+  color: var(--ink);
+}
+
+:focus-visible {
+  outline: 3px solid color-mix(in oklch, var(--blue) 42%, transparent);
+  outline-offset: 3px;
+}
+
+.display {
+  font-family: var(--font-display), sans-serif;
+  font-variation-settings: "wdth" 95;
+  letter-spacing: -0.045em;
+}
+
+.container {
+  width: var(--content);
+  margin-inline: auto;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--green-dark);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.eyebrow::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  content: "";
+}
+
+.button-primary,
+.button-secondary,
+.button-ghost {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 22px;
+  cursor: pointer;
+  font-weight: 780;
+  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 180ms ease, background-color 180ms ease;
+}
+
+.button-primary {
+  background: var(--ink);
+  box-shadow: 0 7px 0 #0d1512;
+  color: var(--paper);
+}
+
+.button-primary:hover {
+  background: var(--green-dark);
+  box-shadow: 0 9px 0 #07583e;
+  transform: translateY(-2px);
+}
+
+.button-primary:active {
+  box-shadow: 0 3px 0 #0d1512;
+  transform: translateY(4px);
+}
+
+.button-secondary {
+  border: 1px solid var(--line);
+  background: color-mix(in oklch, var(--surface) 90%, transparent);
+  box-shadow: var(--shadow-sm);
+}
+
+.button-secondary:hover {
+  border-color: color-mix(in oklch, var(--green) 40%, var(--line));
+  transform: translateY(-2px);
+}
+
+.button-ghost {
+  background: transparent;
+}
+
+.button-ghost:hover {
+  background: color-mix(in oklch, var(--mint) 35%, transparent);
+}
+
+.skip-link {
+  position: fixed;
+  z-index: 1000;
+  top: 12px;
+  left: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: var(--paper);
+  transform: translateY(-160%);
+  transition: transform 160ms ease;
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(var(--float-rotate, 0deg));
+  }
+  50% {
+    transform: translate3d(0, -10px, 0)
+      rotate(calc(var(--float-rotate, 0deg) + 2deg));
+  }
+}
+
+.reveal {
+  animation: rise 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 720px) {
+  :root {
+    --content: min(100% - 28px, 1180px);
+  }
+
+  body {
+    font-size: 15px;
+  }
+}

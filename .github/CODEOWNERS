@@ -1,0 +1,16 @@
+# Default review owner
+* @andreapostiglione
+
+# Security, licensing, governance, and release boundaries
+/.github/ @andreapostiglione
+/LICENSE @andreapostiglione
+/LICENSING.md @andreapostiglione
+/CLA.md @andreapostiglione
+/SECURITY.md @andreapostiglione
+/TRADEMARKS.md @andreapostiglione
+/GOVERNANCE.md @andreapostiglione
+/package.json @andreapostiglione
+/package-lock.json @andreapostiglione
+/worker/ @andreapostiglione
+/db/ @andreapostiglione
+/drizzle/ @andreapostiglione

@@ -1,0 +1,53 @@
+name: Feature request
+description: Propose a focused improvement to Pagelea
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Explain the user problem before proposing an implementation. Large
+        changes should describe privacy, security, licensing, and migration
+        implications.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and pull requests.
+          required: true
+        - label: This request preserves or explicitly analyzes local-first document processing.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: Who has this problem and what are they unable to do?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe observable behavior, not only an implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include workarounds and simpler approaches.
+    validations:
+      required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy and security impact
+      description: State whether data leaves the device or trust boundaries change.
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
