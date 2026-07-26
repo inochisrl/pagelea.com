@@ -1,14 +1,14 @@
-# Pagelea 0.2.1 Security and Release Review
+# Pagelea 0.2.2 Security and Release Review
 
 - **Review date:** 2026-07-26
 - **Owner:** Inochi SRL
-- **Target:** Pagelea Community 0.2.1
+- **Target:** Pagelea Community 0.2.2
 - **Licence:** AGPL-3.0-or-later
 - **Scope:** the current release-candidate source tree
 
 ## Executive summary
 
-Pagelea 0.2.1 is a free and open-source, browser-based PDF workbench. Its
+Pagelea 0.2.2 is a free and open-source, browser-based PDF workbench. Its
 published document workflows process selected files in the user's browser.
 The application has no document-upload endpoint, cloud document library,
 consumer account API, checkout, subscription, entitlement, payment webhook, or
@@ -381,7 +381,7 @@ independently verified scheduled job.
 
 ## Release decision
 
-Pagelea Community 0.2.1 is suitable for a public free/open-source beta only
+Pagelea Community 0.2.2 is suitable for a public free/open-source beta only
 after all of the following are true for the exact release commit:
 
 - the clean-root public-history gate is complete;

@@ -9,6 +9,26 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
+interface HtmlRewriterElement {
+  remove(): void;
+}
+
+interface HtmlRewriterInstance {
+  on(
+    selector: string,
+    handlers: {
+      element(element: HtmlRewriterElement): void;
+    },
+  ): HtmlRewriterInstance;
+  transform(response: Response): Response;
+}
+
+declare const HTMLRewriter:
+  | {
+      new (): HtmlRewriterInstance;
+    }
+  | undefined;
+
 const PAGE_ALLOWED_METHODS = "GET, HEAD, OPTIONS";
 const API_OPTIONS = new Map([
   ["/api/admin/analytics", "GET, OPTIONS"],
@@ -69,6 +89,25 @@ function stripFontPreloadHints(headers: Headers): void {
   } else {
     headers.delete("Link");
   }
+}
+
+function stripHtmlFontPreloads(response: Response): Response {
+  const contentType = response.headers.get("Content-Type") ?? "";
+  if (
+    !response.body ||
+    !contentType.toLowerCase().startsWith("text/html") ||
+    typeof HTMLRewriter !== "function"
+  ) {
+    return response;
+  }
+
+  return new HTMLRewriter()
+    .on('link[rel="preload"][as="font"]', {
+      element(element) {
+        element.remove();
+      },
+    })
+    .transform(response);
 }
 
 function withSecurityHeaders(
@@ -235,7 +274,9 @@ const worker = {
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set("Content-Security-Policy", contentSecurityPolicy);
     const securedRequest = new Request(request, { headers: requestHeaders });
-    const response = await handler.fetch(securedRequest, env, ctx);
+    const response = stripHtmlFontPreloads(
+      await handler.fetch(securedRequest, env, ctx),
+    );
 
     return withSecurityHeaders(
       response,
