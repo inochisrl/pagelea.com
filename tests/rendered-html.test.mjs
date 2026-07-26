@@ -38,18 +38,28 @@ test("server-renders the finished Pagelea homepage", async () => {
   const response = await render("/");
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
+  assert.doesNotMatch(
+    response.headers.get("link") ?? "",
+    /\bas=font\b/i,
+    "font files should load on demand instead of preloading every unicode range",
+  );
 
   const html = await response.text();
   assert.match(html, /<title>Pagelea — Free, open-source PDF tools<\/title>/i);
   assert.match(html, /Change PDF text/);
   assert.match(html, /without uploading it/);
   assert.match(html, /Browse 8 tools/);
+  assert.match(
+    html,
+    /aria-label="Pagelea home"/i,
+    "the compact mobile brand link must keep an accessible name",
+  );
   assert.match(html, /Pagelea Community/);
   assert.match(html, /Pagelea Open Source/);
   assert.match(html, /Free forever/);
   assert.match(
     html,
-    /github\.com\/inochisrl\/pagelea\.com\/tree\/v0\.2\.0/i,
+    /github\.com\/inochisrl\/pagelea\.com\/tree\/v0\.2\.1/i,
     "every rendered page must expose the exact corresponding source tag",
   );
   assert.doesNotMatch(html, /Pagelea Account|Pagelea Desktop/i);

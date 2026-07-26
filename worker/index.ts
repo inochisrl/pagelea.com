@@ -50,6 +50,27 @@ function createContentSecurityPolicy(nonce: string): string {
   ].join("; ");
 }
 
+function stripFontPreloadHints(headers: Headers): void {
+  const linkHeader = headers.get("Link");
+  if (!linkHeader) return;
+
+  const retainedHints = linkHeader
+    .split(/,(?=\s*<)/)
+    .filter((hint) => {
+      const normalized = hint.toLowerCase();
+      return !(
+        normalized.includes("rel=preload") &&
+        normalized.includes("as=font")
+      );
+    });
+
+  if (retainedHints.length > 0) {
+    headers.set("Link", retainedHints.join(", "));
+  } else {
+    headers.delete("Link");
+  }
+}
+
 function withSecurityHeaders(
   response: Response,
   contentSecurityPolicy?: string,
@@ -60,6 +81,8 @@ function withSecurityHeaders(
   for (const [name, value] of Object.entries(STATIC_SECURITY_HEADERS)) {
     headers.set(name, value);
   }
+
+  stripFontPreloadHints(headers);
 
   if (contentSecurityPolicy) {
     headers.set("Content-Security-Policy", contentSecurityPolicy);
@@ -84,7 +107,11 @@ const worker = {
     const isApiRequest =
       url.pathname === "/api" || url.pathname.startsWith("/api/");
 
-    if (url.protocol === "http:" && url.hostname === "pagelea.com") {
+    const shouldUseCanonicalOrigin =
+      (url.protocol === "http:" && url.hostname === "pagelea.com") ||
+      url.hostname === "www.pagelea.com";
+
+    if (shouldUseCanonicalOrigin) {
       const destination = new URL("https://pagelea.com");
       // Assign path/query as URL components so a path beginning with `//`
       // cannot be reinterpreted as a protocol-relative external host.
