@@ -648,6 +648,7 @@ export default function PdfEditorWorkspace({
   const exportButtonRef = useRef<HTMLButtonElement>(null);
   const previousOpenPanelRef = useRef<WorkspacePanel>(null);
   const editorFocusEnteredRef = useRef(false);
+  const restoreExportFocusRef = useRef(false);
   const previewRef = useRef<PdfPreviewDocument | null>(null);
   const loadTokenRef = useRef(0);
   const loadAbortRef = useRef<AbortController | null>(null);
@@ -855,6 +856,15 @@ export default function PdfEditorWorkspace({
     });
     return () => window.cancelAnimationFrame(frame);
   }, [immersive, phase]);
+
+  useEffect(() => {
+    if (phase !== "ready" || !restoreExportFocusRef.current) return;
+    restoreExportFocusRef.current = false;
+    const frame = window.requestAnimationFrame(() => {
+      exportButtonRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [phase]);
 
   useEffect(() => {
     const previousPanel = previousOpenPanelRef.current;
@@ -2400,12 +2410,8 @@ export default function PdfEditorWorkspace({
         cause instanceof Error ? cause.message : "The PDF could not export.",
       );
     } finally {
+      restoreExportFocusRef.current = restoreExportFocus;
       setPhase("ready");
-      if (restoreExportFocus) {
-        window.requestAnimationFrame(() => {
-          exportButtonRef.current?.focus({ preventScroll: true });
-        });
-      }
     }
   }
 

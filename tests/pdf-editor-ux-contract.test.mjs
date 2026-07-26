@@ -36,6 +36,14 @@ test("editor uses an immersive, viewport-owned application shell", () => {
   assert.match(editorSource, /editorHeadingRef\.current\?\.focus/);
   assert.match(editorSource, /editorFocusEnteredRef\.current/);
   assert.match(editorSource, /document\.activeElement === exportButtonRef\.current/);
+  assert.match(
+    editorSource,
+    /phase !== "ready" \|\| !restoreExportFocusRef\.current/,
+  );
+  assert.match(
+    editorSource,
+    /restoreExportFocusRef\.current = restoreExportFocus/,
+  );
   assert.match(editorSource, /exportButtonRef\.current\?\.focus/);
   assert.match(
     editorSource,
