@@ -65,7 +65,12 @@ export function SiteHeader() {
       </a>
       <header className={styles.header}>
         <div className={`${styles.inner} container`}>
-          <Link className={styles.brand} href="/" onClick={closeMenus}>
+          <Link
+            aria-label="Pagelea home"
+            className={styles.brand}
+            href="/"
+            onClick={closeMenus}
+          >
             <span className={styles.brandMark} aria-hidden="true">
               P
             </span>

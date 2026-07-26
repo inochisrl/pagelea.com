@@ -138,7 +138,7 @@ test("answers API OPTIONS without advertising cross-origin access", async () => 
   assert.equal((await retired.json()).error.code, "not_found");
 });
 
-test("redirects only the canonical Pagelea HTTP host to HTTPS", async () => {
+test("redirects canonical HTTP and the www alias to the HTTPS apex", async () => {
   const response = await requestUrl(
     "http://pagelea.com/tools/pdf-editor?source=homepage%20cta",
   );
@@ -153,6 +153,16 @@ test("redirects only the canonical Pagelea HTTP host to HTTPS", async () => {
     response.headers.get("content-security-policy"),
     "default-src 'none'; frame-ancestors 'none'; sandbox;",
   );
+
+  const wwwResponse = await requestUrl(
+    "https://www.pagelea.com/tools/pdf-editor?source=www%20alias",
+  );
+  assert.equal(wwwResponse.status, 308);
+  assert.equal(
+    wwwResponse.headers.get("location"),
+    "https://pagelea.com/tools/pdf-editor?source=www%20alias",
+  );
+  assertStaticSecurityHeaders(wwwResponse);
 
   const doubleSlashResponse = await requestUrl(
     "http://pagelea.com//attacker.example/phish",

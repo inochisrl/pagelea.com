@@ -8,6 +8,19 @@ and this project follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-26
+
+### Fixed
+
+- Gave the compact mobile home link an explicit accessible name.
+- Added the verified `www.pagelea.com` hostname and canonicalized it to the
+  HTTPS apex while preserving the request path and query string.
+
+### Performance
+
+- Removed eager font hints that preloaded every hosted Unicode range even
+  though the browser only needs the ranges used by the current page.
+
 ## [0.2.0] - 2026-07-26
 
 ### Added
