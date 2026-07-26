@@ -8,6 +8,14 @@ and this project follows
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-26
+
+### Fixed
+
+- Restored keyboard focus to Export only after the optimized production build
+  has re-enabled the button, preventing focus from falling back to the page
+  after a completed download.
+
 ## [0.3.0] - 2026-07-26
 
 ### Added
