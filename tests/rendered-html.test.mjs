@@ -59,11 +59,12 @@ test("server-renders the finished Pagelea homepage", async () => {
   assert.match(html, /Free forever/);
   assert.match(
     html,
-    /github\.com\/inochisrl\/pagelea\.com\/tree\/v0\.2\.2/i,
+    /github\.com\/inochisrl\/pagelea\.com\/tree\/v0\.3\.0/i,
     "every rendered page must expose the exact corresponding source tag",
   );
   assert.doesNotMatch(html, /Pagelea Account|Pagelea Desktop/i);
   assert.match(html, /https:\/\/pagelea\.com\/og\.png/);
+  assert.match(html, /viewport-fit=cover/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 
   const homeStyles = await readFile(
@@ -175,10 +176,13 @@ test("server-renders the dedicated visual PDF editor", async () => {
   assert.match(html, /<title>PDF Editor · Pagelea<\/title>/i);
   assert.match(html, /Click existing PDF text and rewrite it/);
   assert.match(html, /Pagelea detects editable text locally/);
-  assert.match(html, /Edit text/);
   assert.match(html, /Start blank/);
   assert.match(html, /nothing is uploaded/i);
   assert.doesNotMatch(html, /Pagelea workspace/);
+  assert.doesNotMatch(html, /How it works/i);
+  assert.doesNotMatch(html, /Related tools/i);
+  assert.doesNotMatch(html, /aria-label="Primary navigation"/i);
+  assert.match(html, /aria-label="Pagelea home"/i);
 });
 
 test("does not render hidden demo routes and ships no starter preview", async () => {

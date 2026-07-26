@@ -47,6 +47,18 @@ export default async function ToolPage({ params }: PageProps) {
 
   if (!tool) notFound();
 
+  if (slug === "pdf-editor") {
+    return (
+      <main
+        id="main"
+        className={styles.editorAppMain}
+        style={{ "--tool-accent": tool.accent } as CSSProperties}
+      >
+        <PdfEditorWorkspace immersive mode="edit" />
+      </main>
+    );
+  }
+
   const steps = tool.howTo;
   const related = TOOLS.filter(
     (candidate) =>
@@ -80,16 +92,13 @@ export default async function ToolPage({ params }: PageProps) {
         <section className={styles.workspaceSection}>
           <div
             className={`${styles.workspaceWrap} ${
-              slug === "pdf-editor" ||
               slug === "sign-pdf" ||
               slug === "organize-pdf"
                 ? styles.editorWorkspaceWrap
                 : ""
             } container`}
           >
-            {slug === "pdf-editor" ||
-            slug === "sign-pdf" ||
-            slug === "organize-pdf" ? (
+            {slug === "sign-pdf" || slug === "organize-pdf" ? (
               <PdfEditorWorkspace
                 mode={
                   slug === "sign-pdf"

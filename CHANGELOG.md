@@ -8,6 +8,51 @@ and this project follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-26
+
+### Added
+
+- Added automatic `Fit page` and `Fit width` zoom with bounded viewport
+  calculations, `ResizeObserver`, visual-viewport updates, and portrait or
+  landscape refitting.
+- Added canvas-native pinch-to-zoom and one-finger pan for touch users in
+  Select and Edit text modes, plus trackpad zoom up to 400%.
+- Added collapsible page and property regions on desktop, side drawers on
+  tablet, and focus-managed bottom sheets on mobile.
+- Added explicit product and design-system documentation for the Pagelea
+  workbench, including responsive, accessibility, input, and visual rules.
+- Added regression coverage for viewport fitting, immersive routing,
+  responsive panels, touch gestures, focus management, and the mobile
+  viewport contract.
+
+### Changed
+
+- Rebuilt `/tools/pdf-editor` as a dedicated `100dvh` application shell. The
+  marketing header, hero, explanatory sections, and footer no longer compete
+  with the document workspace.
+- Made the PDF canvas the persistent primary region at every breakpoint.
+  Desktop keeps pages and properties beside it; tablet and mobile reveal them
+  only when requested instead of stacking them into a long page.
+- Kept Export pinned in the top app bar and moved editing tools into a
+  thumb-reachable mobile dock with safe-area support.
+- Adapted mobile landscape to a vertical tool dock so the document receives
+  substantially more usable height.
+- Raised coarse-pointer controls to at least 44 by 44 CSS pixels and enlarged
+  the invisible resize-handle hit area.
+
+### Fixed
+
+- Removed browser-level horizontal and vertical overflow from the active PDF
+  editor at desktop, tablet, phone, 320-pixel, and landscape viewports.
+- Prevented the editor command bar from being hidden beneath the public-site
+  header and prevented Export from extending beyond narrow screens.
+- Restored visible focus treatment, announced editor status updates, exposed
+  the active page with `aria-current`, and corrected toolbar semantics.
+- Added focus entry, trapping, Escape dismissal, and focus restoration for
+  compact page and property panels.
+- Added an authoritative `viewport-fit=cover` tag for safe-area insets in the
+  current edge runtime.
+
 ## [0.2.2] - 2026-07-26
 
 ### Performance

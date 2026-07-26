@@ -4,7 +4,8 @@ import test from "node:test";
 
 const projectRoot = new URL("../", import.meta.url);
 
-const [editorSource, editorCss, exportSource, toolsSource] = await Promise.all([
+const [editorSource, editorCss, exportSource, toolsSource, toolRouteSource] =
+  await Promise.all([
   readFile(
     new URL("app/components/PdfEditorWorkspace.tsx", projectRoot),
     "utf8",
@@ -15,25 +16,80 @@ const [editorSource, editorCss, exportSource, toolsSource] = await Promise.all([
   ),
   readFile(new URL("app/lib/pdf-editor-export.ts", projectRoot), "utf8"),
   readFile(new URL("app/lib/tools.ts", projectRoot), "utf8"),
+  readFile(new URL("app/tools/[slug]/page.tsx", projectRoot), "utf8"),
 ]);
 
-test("editor keeps page management usable on narrow screens", () => {
-  const mobileRules = editorCss.slice(
-    editorCss.indexOf("@media (max-width: 760px)"),
+test("editor uses an immersive, viewport-owned application shell", () => {
+  assert.match(
+    editorCss,
+    /\.editor\.immersive\s*\{[\s\S]*?height:\s*100dvh;[\s\S]*?grid-template-rows:\s*auto minmax\(0,\s*1fr\) auto;/,
+  );
+  assert.match(
+    editorCss,
+    /\.immersive \.editorBody\s*\{[\s\S]*?height:\s*auto;[\s\S]*?min-height:\s*0;[\s\S]*?grid-template-columns:\s*200px minmax\(0,\s*1fr\) 300px;/,
+  );
+  assert.match(
+    toolRouteSource,
+    /<PdfEditorWorkspace immersive mode="edit" \/>/,
+  );
+  assert.match(editorSource, /document\.documentElement\.style\.overflow = "hidden"/);
+  assert.match(editorSource, /editorHeadingRef\.current\?\.focus/);
+  assert.match(editorSource, /editorFocusEnteredRef\.current/);
+  assert.match(editorSource, /document\.activeElement === exportButtonRef\.current/);
+  assert.match(editorSource, /exportButtonRef\.current\?\.focus/);
+  assert.match(
+    editorSource,
+    /phase === "exporting" \? "Exporting PDF" : "Export PDF"/,
+  );
+  assert.match(
+    editorSource,
+    /phase === "idle" \|\| phase === "loading"[\s\S]*?editorFocusEnteredRef\.current = false/,
+  );
+  assert.match(
+    editorCss,
+    /@media \(max-height: 520px\) and \(orientation: landscape\)[\s\S]*?\.workspace\.immersive \.start\s*\{[\s\S]*?overflow-y:\s*auto;[\s\S]*?\.workspace\.immersive \.startArt\s*\{[\s\S]*?display:\s*none;/,
+  );
+});
+
+test("editor turns pages and properties into adaptive drawers and sheets", () => {
+  const compactRules = editorCss.slice(
+    editorCss.indexOf("@media (max-width: 1120px)"),
     editorCss.indexOf("@media (prefers-reduced-motion: reduce)"),
   );
+  const mobileRules = compactRules.slice(
+    compactRules.indexOf("@media (max-width: 760px)"),
+  );
 
-  assert.match(mobileRules, /\.thumbControls\s*\{[\s\S]*?display:\s*grid;/);
   assert.match(
-    mobileRules,
-    /grid-template-columns:\s*repeat\(2,\s*44px\);/,
+    compactRules,
+    /\.immersive \.pagesPanel,[\s\S]*?position:\s*absolute;/,
+  );
+  assert.match(
+    compactRules,
+    /\.immersive \.pagesPanel\[data-open="true"\],[\s\S]*?transform:\s*none;/,
   );
   assert.match(
     mobileRules,
-    /\.thumbIcon\s*\{[\s\S]*?width:\s*44px;[\s\S]*?height:\s*44px;/,
+    /\.immersive \.pagesPanel,[\s\S]*?transform:\s*translateY\(105%\);/,
   );
-  assert.match(mobileRules, /\.thumbnail\s*\{[\s\S]*?width:\s*124px;/);
-  assert.doesNotMatch(mobileRules, /\.thumbControls\s*\{[\s\S]*?display:\s*none;/);
+  assert.match(
+    mobileRules,
+    /\.immersive \.thumbIcon\s*\{[\s\S]*?width:\s*44px;[\s\S]*?height:\s*44px;/,
+  );
+  assert.match(editorSource, /aria-controls="pdf-pages-panel"/);
+  assert.match(editorSource, /aria-controls="pdf-properties-panel"/);
+  assert.match(
+    editorSource,
+    /aria-expanded=\{[\s\S]*?openPanel === "pages"[\s\S]*?: !pagesCollapsed/,
+  );
+  assert.match(editorSource, /inert=\{/);
+  assert.match(editorSource, /trapPanelFocus/);
+  assert.match(editorSource, /const pagesHidden = immersive/);
+  assert.match(editorSource, /const propertiesHidden = immersive/);
+  assert.match(
+    editorSource,
+    /if \(!immersive \|\| !compactLayout \|\| event\.key !== "Tab"\) return;/,
+  );
 
   for (const label of [
     'aria-label={`Move page ${index + 1} up`}',
@@ -43,6 +99,25 @@ test("editor keeps page management usable on narrow screens", () => {
   ]) {
     assert.ok(editorSource.includes(label), label);
   }
+});
+
+test("editor fits the page responsively and preserves touch navigation", () => {
+  assert.match(editorSource, /computeEditorFitZoom/);
+  assert.match(editorSource, /new ResizeObserver\(applyFit\)/);
+  assert.match(editorSource, /window\.visualViewport\?\.addEventListener/);
+  assert.match(editorSource, /fitMode === "custom"/);
+  assert.match(editorSource, /onWheel=\{onCanvasWheel\}/);
+  assert.match(editorCss, /touch-action:\s*pan-x pan-y pinch-zoom;/);
+  assert.match(editorCss, /\.directSurface\s*\{[\s\S]*?touch-action:\s*none;/);
+  assert.match(editorCss, /\.panSurface\s*\{[\s\S]*?touch-action:\s*none;/);
+  assert.match(editorSource, /type CanvasTouchGesture/);
+  assert.match(editorSource, /startDistance:/);
+  assert.match(editorSource, /scroller\.scrollLeft =/);
+  assert.match(editorSource, /gesture\.startZoom \* \(distance \/ gesture\.startDistance\)/);
+  assert.match(editorCss, /\.resizeHandle::before\s*\{[\s\S]*?inset:\s*-15px;/);
+  assert.match(editorSource, /aria-current=\{/);
+  assert.match(editorSource, /role="toolbar"/);
+  assert.match(editorSource, /<footer aria-live="polite"/);
 });
 
 test("editor exposes a coherent keyboard interaction contract", () => {

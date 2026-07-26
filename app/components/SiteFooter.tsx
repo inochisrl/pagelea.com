@@ -4,11 +4,11 @@ import { TOOLS } from "../lib/tools";
 import styles from "./SiteFooter.module.css";
 
 const DEPLOYED_SOURCE_URL =
-  "https://github.com/inochisrl/pagelea.com/tree/v0.2.2";
+  "https://github.com/inochisrl/pagelea.com/tree/v0.3.0";
 
 const RESOURCE_LINKS = [
   ["Free forever", "/pricing"],
-  ["Source for v0.2.2", DEPLOYED_SOURCE_URL],
+  ["Source for v0.3.0", DEPLOYED_SOURCE_URL],
   ["About Pagelea", "/about"],
   ["Help centre", "/help"],
   ["Security", "/security"],
@@ -88,7 +88,7 @@ export function SiteFooter() {
       <div className={`${styles.bottom} container`}>
         <span>© {new Date().getFullYear()} Inochi SRL</span>
         <span>
-          <a href={DEPLOYED_SOURCE_URL}>Source for v0.2.2</a>
+          <a href={DEPLOYED_SOURCE_URL}>Source for v0.3.0</a>
           {" · "}AGPL-3.0-or-later software. Pagelea is an Inochi SRL trademark.
         </span>
       </div>

@@ -2,6 +2,14 @@
   background: var(--paper);
 }
 
+.editorAppMain {
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  background: #dfe5e0;
+}
+
 .hero {
   position: relative;
   overflow: hidden;
