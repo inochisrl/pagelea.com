@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, Manrope } from "next/font/google";
 import { AnalyticsBeacon } from "./components/AnalyticsBeacon";
 import "./globals.css";
@@ -14,6 +14,13 @@ const body = Manrope({
   variable: "--font-body",
   subsets: ["latin"],
 });
+
+// The runtime currently omits viewportFit from generated viewport metadata.
+// Suppress its default tag so the complete manual tag below is authoritative.
+export const viewport: Viewport = {
+  initialScale: undefined,
+  width: undefined,
+};
 
 export function generateMetadata(): Metadata {
   return {
@@ -64,6 +71,10 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        <meta
+          content="width=device-width, initial-scale=1, viewport-fit=cover"
+          name="viewport"
+        />
         <link rel="icon" href="/favicon.png" />
         <link rel="shortcut icon" href="/favicon.png" />
       </head>

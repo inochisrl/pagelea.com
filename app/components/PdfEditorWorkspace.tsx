@@ -14,7 +14,9 @@ import {
   ImagePlus,
   Italic,
   LoaderCircle,
+  Maximize2,
   MousePointer2,
+  PanelLeft,
   PenLine,
   Plus,
   Redo2,
@@ -22,15 +24,18 @@ import {
   SendToBack,
   ShieldCheck,
   Signature,
+  SlidersHorizontal,
   Square,
   TextCursorInput,
   Trash2,
   Type as TypeIcon,
   Undo2,
   Upload,
+  X,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
+import Link from "next/link";
 import {
   useEffect,
   useMemo,
@@ -38,7 +43,9 @@ import {
   useState,
   type ChangeEvent,
   type DragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type WheelEvent as ReactWheelEvent,
 } from "react";
 
 import { trackAnalyticsEvent } from "../lib/analytics-client";
@@ -53,6 +60,10 @@ import {
   type Point,
   type TextEditorElement,
 } from "../lib/pdf-editor-types";
+import {
+  computeEditorFitZoom,
+  type EditorFitMode,
+} from "../lib/pdf-editor-viewport";
 import {
   extractPdfPageText,
   type ExtractedPdfTextFragment,
@@ -118,6 +129,23 @@ type PendingImage = {
 };
 
 type TextLayerStatus = "idle" | "loading" | "ready" | "empty" | "error";
+type WorkspacePanel = "pages" | "properties" | null;
+
+type CanvasTouchGesture =
+  | {
+      kind: "pan";
+      moved: boolean;
+      pointerId: number;
+      startClientX: number;
+      startClientY: number;
+      startScrollLeft: number;
+      startScrollTop: number;
+    }
+  | {
+      kind: "pinch";
+      startDistance: number;
+      startZoom: number;
+    };
 
 type TextLayerState = {
   key: string;
@@ -595,8 +623,10 @@ function stopEvent(event: ReactPointerEvent) {
 }
 
 export default function PdfEditorWorkspace({
+  immersive = false,
   mode = "edit",
 }: {
+  immersive?: boolean;
   mode?: "edit" | "sign" | "organize";
 }) {
   const analyticsTool =
@@ -609,11 +639,22 @@ export default function PdfEditorWorkspace({
   const imageInputRef = useRef<HTMLInputElement>(null);
   const signatureInputRef = useRef<HTMLInputElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
+  const canvasViewportRef = useRef<HTMLDivElement>(null);
+  const editorHeadingRef = useRef<HTMLHeadingElement>(null);
+  const pagesPanelRef = useRef<HTMLElement>(null);
+  const propertiesPanelRef = useRef<HTMLElement>(null);
+  const pagesToggleRef = useRef<HTMLButtonElement>(null);
+  const propertiesToggleRef = useRef<HTMLButtonElement>(null);
+  const exportButtonRef = useRef<HTMLButtonElement>(null);
+  const previousOpenPanelRef = useRef<WorkspacePanel>(null);
+  const editorFocusEnteredRef = useRef(false);
   const previewRef = useRef<PdfPreviewDocument | null>(null);
   const loadTokenRef = useRef(0);
   const loadAbortRef = useRef<AbortController | null>(null);
   const imageAbortRef = useRef<AbortController | null>(null);
   const interactionRef = useRef<Interaction | null>(null);
+  const canvasTouchPointsRef = useRef<Map<number, Point>>(new Map());
+  const canvasTouchGestureRef = useRef<CanvasTouchGesture | null>(null);
   const textEditOriginRef = useRef<{
     elementId: string;
     snapshot: EditorSnapshot;
@@ -650,6 +691,13 @@ export default function PdfEditorWorkspace({
     mode === "sign" ? "signature" : "select",
   );
   const [zoom, setZoom] = useState(0.9);
+  const [fitMode, setFitMode] = useState<EditorFitMode | "custom">(
+    "page",
+  );
+  const [compactLayout, setCompactLayout] = useState(false);
+  const [openPanel, setOpenPanel] = useState<WorkspacePanel>(null);
+  const [pagesCollapsed, setPagesCollapsed] = useState(false);
+  const [propertiesCollapsed, setPropertiesCollapsed] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [error, setError] = useState("");
   const [progress, setProgress] = useState({
@@ -758,6 +806,134 @@ export default function PdfEditorWorkspace({
       : activeTextKey
         ? "loading"
         : "idle";
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 1120px)");
+    const syncLayout = () => {
+      setCompactLayout(media.matches);
+      if (!media.matches) setOpenPanel(null);
+    };
+
+    syncLayout();
+    media.addEventListener("change", syncLayout);
+    return () => media.removeEventListener("change", syncLayout);
+  }, []);
+
+  useEffect(() => {
+    if (!immersive) return;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousBodyOverscroll =
+      document.body.style.overscrollBehavior;
+
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    document.body.style.overscrollBehavior = "none";
+
+    return () => {
+      document.documentElement.style.overflow = previousHtmlOverflow;
+      document.body.style.overflow = previousBodyOverflow;
+      document.body.style.overscrollBehavior = previousBodyOverscroll;
+    };
+  }, [immersive]);
+
+  useEffect(() => {
+    if (phase === "idle" || phase === "loading") {
+      editorFocusEnteredRef.current = false;
+      return;
+    }
+    if (
+      !immersive ||
+      phase !== "ready" ||
+      editorFocusEnteredRef.current
+    ) {
+      return;
+    }
+    editorFocusEnteredRef.current = true;
+    const frame = window.requestAnimationFrame(() => {
+      editorHeadingRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [immersive, phase]);
+
+  useEffect(() => {
+    const previousPanel = previousOpenPanelRef.current;
+    previousOpenPanelRef.current = openPanel;
+
+    if (openPanel) {
+      const panel =
+        openPanel === "pages"
+          ? pagesPanelRef.current
+          : propertiesPanelRef.current;
+      const frame = window.requestAnimationFrame(() => {
+        panel
+          ?.querySelector<HTMLElement>("[data-panel-close]")
+          ?.focus({ preventScroll: true });
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
+
+    if (previousPanel) {
+      const toggle =
+        previousPanel === "pages"
+          ? pagesToggleRef.current
+          : propertiesToggleRef.current;
+      toggle?.focus({ preventScroll: true });
+    }
+  }, [openPanel]);
+
+  useEffect(() => {
+    if (
+      phase !== "ready" ||
+      !activePage ||
+      fitMode === "custom"
+    ) {
+      return;
+    }
+
+    const viewport = canvasViewportRef.current;
+    if (!viewport) return;
+
+    const applyFit = () => {
+      const bounds = viewport.getBoundingClientRect();
+      const display = pageDisplaySize(activePage);
+      const phone = window.matchMedia("(max-width: 760px)").matches;
+      const compactLandscape =
+        bounds.height <= 520 && bounds.width > bounds.height;
+      const nextZoom = computeEditorFitZoom({
+        horizontalPadding: compactLandscape ? 24 : phone ? 28 : 88,
+        mode: fitMode,
+        pageHeight: display.height,
+        pageWidth: display.width,
+        verticalPadding: compactLandscape
+          ? phone
+            ? 82
+            : 24
+          : phone
+            ? 28
+            : 88,
+        viewportHeight: bounds.height,
+        viewportWidth: bounds.width,
+      });
+      setZoom((current) =>
+        Math.abs(current - nextZoom) < 0.005 ? current : nextZoom,
+      );
+    };
+
+    applyFit();
+    const observer = new ResizeObserver(applyFit);
+    observer.observe(viewport);
+    window.visualViewport?.addEventListener("resize", applyFit);
+
+    return () => {
+      observer.disconnect();
+      window.visualViewport?.removeEventListener("resize", applyFit);
+    };
+  }, [
+    activePage,
+    fitMode,
+    phase,
+  ]);
 
   useEffect(() => {
     if (
@@ -1084,6 +1260,7 @@ export default function PdfEditorWorkspace({
         actions.deleteSelected();
       }
       if (event.key === "Escape") {
+        setOpenPanel(null);
         actions.finishInspectorEditing();
         if (actions.editingTextId) {
           actions.finishTextEditing();
@@ -1255,6 +1432,8 @@ export default function PdfEditorWorkspace({
       setFuture([]);
       setActivePageId(pages[0].id);
       setSelectedId(null);
+      setFitMode("page");
+      setOpenPanel(null);
       setTool(
         mode === "sign"
           ? "signature"
@@ -1306,6 +1485,8 @@ export default function PdfEditorWorkspace({
     setFuture([]);
     setActivePageId(page.id);
     setSelectedId(null);
+    setFitMode("page");
+    setOpenPanel(null);
     setTool(
       mode === "sign"
         ? "signature"
@@ -1657,6 +1838,49 @@ export default function PdfEditorWorkspace({
 
   function onSurfacePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (!activePage || event.button !== 0) return;
+
+    if (
+      event.pointerType === "touch" &&
+      (tool === "select" || tool === "edit-text")
+    ) {
+      event.preventDefault();
+      const points = canvasTouchPointsRef.current;
+      points.set(event.pointerId, {
+        x: event.clientX,
+        y: event.clientY,
+      });
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture can be unavailable during browser gesture handoff.
+      }
+
+      if (points.size >= 2) {
+        const [first, second] = [...points.values()];
+        canvasTouchGestureRef.current = {
+          kind: "pinch",
+          startDistance: Math.max(
+            1,
+            Math.hypot(second.x - first.x, second.y - first.y),
+          ),
+          startZoom: zoom,
+        };
+        setFitMode("custom");
+      } else {
+        const scroller = canvasViewportRef.current;
+        canvasTouchGestureRef.current = {
+          kind: "pan",
+          moved: false,
+          pointerId: event.pointerId,
+          startClientX: event.clientX,
+          startClientY: event.clientY,
+          startScrollLeft: scroller?.scrollLeft ?? 0,
+          startScrollTop: scroller?.scrollTop ?? 0,
+        };
+      }
+      return;
+    }
+
     const point = pointFromEvent(event.nativeEvent);
     if (!point) return;
 
@@ -1788,6 +2012,50 @@ export default function PdfEditorWorkspace({
   }
 
   function onSurfacePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (canvasTouchPointsRef.current.has(event.pointerId)) {
+      event.preventDefault();
+      canvasTouchPointsRef.current.set(event.pointerId, {
+        x: event.clientX,
+        y: event.clientY,
+      });
+      const gesture = canvasTouchGestureRef.current;
+      const scroller = canvasViewportRef.current;
+      if (!gesture || !scroller) return;
+
+      if (
+        gesture.kind === "pinch" &&
+        canvasTouchPointsRef.current.size >= 2
+      ) {
+        const [first, second] = [
+          ...canvasTouchPointsRef.current.values(),
+        ];
+        const distance = Math.max(
+          1,
+          Math.hypot(second.x - first.x, second.y - first.y),
+        );
+        setZoom(
+          clamp(
+            gesture.startZoom * (distance / gesture.startDistance),
+            0.1,
+            4,
+          ),
+        );
+        return;
+      }
+
+      if (
+        gesture.kind === "pan" &&
+        gesture.pointerId === event.pointerId
+      ) {
+        const deltaX = event.clientX - gesture.startClientX;
+        const deltaY = event.clientY - gesture.startClientY;
+        if (Math.hypot(deltaX, deltaY) > 5) gesture.moved = true;
+        scroller.scrollLeft = gesture.startScrollLeft - deltaX;
+        scroller.scrollTop = gesture.startScrollTop - deltaY;
+      }
+      return;
+    }
+
     const interaction = interactionRef.current;
     if (!interaction || interaction.pointerId !== event.pointerId) return;
     const point = pointFromEvent(event.nativeEvent);
@@ -1914,6 +2182,45 @@ export default function PdfEditorWorkspace({
   }
 
   function finishInteraction(event: ReactPointerEvent<HTMLDivElement>) {
+    if (canvasTouchPointsRef.current.has(event.pointerId)) {
+      event.preventDefault();
+      const gesture = canvasTouchGestureRef.current;
+      canvasTouchPointsRef.current.delete(event.pointerId);
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture can already be released by the browser.
+      }
+
+      const remaining = [...canvasTouchPointsRef.current.entries()];
+      if (remaining.length === 1) {
+        const [pointerId, point] = remaining[0];
+        const scroller = canvasViewportRef.current;
+        canvasTouchGestureRef.current = {
+          kind: "pan",
+          moved: true,
+          pointerId,
+          startClientX: point.x,
+          startClientY: point.y,
+          startScrollLeft: scroller?.scrollLeft ?? 0,
+          startScrollTop: scroller?.scrollTop ?? 0,
+        };
+      } else {
+        canvasTouchGestureRef.current = null;
+      }
+
+      if (
+        gesture?.kind === "pan" &&
+        !gesture.moved &&
+        tool === "select"
+      ) {
+        finishInspectorEditing();
+        finishTextEditing();
+        setSelectedId(null);
+      }
+      return;
+    }
+
     const interaction = interactionRef.current;
     if (!interaction || interaction.pointerId !== event.pointerId) return;
     event.preventDefault();
@@ -2052,6 +2359,8 @@ export default function PdfEditorWorkspace({
   }
 
   async function exportPdf() {
+    const restoreExportFocus =
+      document.activeElement === exportButtonRef.current;
     finishInspectorEditing();
     finishTextEditing();
     const currentSnapshot = snapshotRef.current;
@@ -2092,6 +2401,11 @@ export default function PdfEditorWorkspace({
       );
     } finally {
       setPhase("ready");
+      if (restoreExportFocus) {
+        window.requestAnimationFrame(() => {
+          exportButtonRef.current?.focus({ preventScroll: true });
+        });
+      }
     }
   }
 
@@ -2336,12 +2650,79 @@ export default function PdfEditorWorkspace({
     );
   }
 
+  function changeZoom(delta: number) {
+    setFitMode("custom");
+    setZoom((value) => clamp(value + delta, 0.1, 4));
+  }
+
+  function onCanvasWheel(event: ReactWheelEvent<HTMLDivElement>) {
+    if (!event.ctrlKey && !event.metaKey) return;
+    event.preventDefault();
+    setFitMode("custom");
+    setZoom((value) =>
+      clamp(value * Math.exp(-event.deltaY * 0.002), 0.1, 4),
+    );
+  }
+
+  function trapPanelFocus(event: ReactKeyboardEvent<HTMLElement>) {
+    if (!immersive || !compactLayout || event.key !== "Tab") return;
+    const controls = Array.from(
+      event.currentTarget.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((control) => control.getClientRects().length > 0);
+    const first = controls[0];
+    const last = controls.at(-1);
+    if (!first || !last) return;
+
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  function toggleWorkspacePanel(panel: Exclude<WorkspacePanel, null>) {
+    if (compactLayout) {
+      setOpenPanel((current) => (current === panel ? null : panel));
+      return;
+    }
+    if (panel === "pages") {
+      setPagesCollapsed((current) => !current);
+    } else {
+      setPropertiesCollapsed((current) => !current);
+    }
+  }
+
+  function closeWorkspacePanel(panel: Exclude<WorkspacePanel, null>) {
+    if (compactLayout) {
+      setOpenPanel(null);
+      return;
+    }
+    if (panel === "pages") setPagesCollapsed(true);
+    else setPropertiesCollapsed(true);
+    window.requestAnimationFrame(() => {
+      (panel === "pages"
+        ? pagesToggleRef.current
+        : propertiesToggleRef.current
+      )?.focus({ preventScroll: true });
+    });
+  }
+
+  function toggleFitMode() {
+    setFitMode((current) =>
+      current === "page" ? "width" : "page",
+    );
+  }
+
   if (phase === "idle" || phase === "loading") {
     return (
       <div
         className={`${styles.workspace} ${
           dragActive ? styles.dropActive : ""
-        }`}
+        } ${immersive ? styles.immersive : ""}`}
         onDragEnter={(event) => {
           event.preventDefault();
           setDragActive(true);
@@ -2360,11 +2741,23 @@ export default function PdfEditorWorkspace({
           type="file"
         />
         <div className={styles.start}>
+          {immersive ? (
+            <header className={styles.startHeader}>
+              <Link
+                aria-label="Pagelea home"
+                className={styles.appBrand}
+                href="/"
+              >
+                <span className={styles.brandMark}>P</span>
+                <span className={styles.brandWordmark}>Pagelea</span>
+              </Link>
+              <span className={styles.startBadge}>
+                <ShieldCheck size={17} />
+                Local only
+              </span>
+            </header>
+          ) : null}
           <div className={styles.startArt} aria-hidden="true">
-            <span className={styles.startBadge}>
-              <ShieldCheck size={17} />
-              Local only
-            </span>
             <span className={styles.startIcon}>
               {phase === "loading" ? (
                 <LoaderCircle size={40} />
@@ -2374,7 +2767,13 @@ export default function PdfEditorWorkspace({
             </span>
           </div>
           <div>
-            <p className={styles.startTitle}>
+            {!immersive ? (
+              <span className={styles.startBadge}>
+                <ShieldCheck size={17} />
+                Local only
+              </span>
+            ) : null}
+            <h1 className={styles.startTitle}>
               {phase === "loading"
                 ? "Opening your PDF…"
                 : mode === "sign"
@@ -2382,7 +2781,7 @@ export default function PdfEditorWorkspace({
                   : mode === "organize"
                     ? "Put every page in the right place."
                   : "Click existing PDF text and rewrite it."}
-            </p>
+            </h1>
             <p className={styles.startCopy}>
               {phase === "loading"
                 ? "Pages are being prepared in this browser."
@@ -2426,13 +2825,32 @@ export default function PdfEditorWorkspace({
   const activeIndex = snapshot.pages.findIndex(
     (page) => page.id === activePage.id,
   );
+  const pagesHidden = immersive
+    ? compactLayout
+      ? openPanel !== "pages"
+      : pagesCollapsed
+    : false;
+  const propertiesHidden = immersive
+    ? compactLayout
+      ? openPanel !== "properties"
+      : propertiesCollapsed
+    : false;
 
   return (
     <div
       className={`${styles.workspace} ${styles.editor} ${
         mode === "organize" ? styles.organizeMode : ""
-      }`}
+      } ${immersive ? styles.immersive : ""}`}
+      data-pages-collapsed={pagesCollapsed}
+      data-properties-collapsed={propertiesCollapsed}
     >
+      <h1
+        className={styles.srOnly}
+        ref={editorHeadingRef}
+        tabIndex={-1}
+      >
+        Pagelea PDF Editor
+      </h1>
       <input
         accept="application/pdf,.pdf"
         aria-hidden="true"
@@ -2462,34 +2880,49 @@ export default function PdfEditorWorkspace({
       />
 
       <header className={styles.topbar}>
-        <div className={styles.docIdentity}>
-          <span className={styles.logoMark}>
-            <FileText size={18} />
-          </span>
-          <div className={styles.docMeta}>
-            <input
-              aria-label="Output filename"
-              autoCapitalize="off"
-              autoComplete="off"
-              autoCorrect="off"
-              className={styles.docName}
-              maxLength={PDF_SECURITY_LIMITS.maxFilenameCharacters}
-              onChange={(event) =>
-                setDocumentName(
-                  event.target.value.slice(
-                    0,
-                    PDF_SECURITY_LIMITS.maxFilenameCharacters,
-                  ),
-                )
-              }
-              spellCheck={false}
-              value={documentName}
-            />
-            <span className={styles.docStatus}>
-              <ShieldCheck size={13} />
-              Local draft · {snapshot.pages.length}{" "}
-              {snapshot.pages.length === 1 ? "page" : "pages"}
+        <div className={styles.topbarIdentity}>
+          {immersive ? (
+            <>
+              <Link
+                aria-label="Pagelea home"
+                className={styles.appBrand}
+                href="/"
+              >
+                <span className={styles.brandMark}>P</span>
+                <span className={styles.brandWordmark}>Pagelea</span>
+              </Link>
+              <span className={styles.appDivider} aria-hidden="true" />
+            </>
+          ) : null}
+          <div className={styles.docIdentity}>
+            <span className={styles.logoMark}>
+              <FileText size={18} />
             </span>
+            <div className={styles.docMeta}>
+              <input
+                aria-label="Output filename"
+                autoCapitalize="off"
+                autoComplete="off"
+                autoCorrect="off"
+                className={styles.docName}
+                maxLength={PDF_SECURITY_LIMITS.maxFilenameCharacters}
+                onChange={(event) =>
+                  setDocumentName(
+                    event.target.value.slice(
+                      0,
+                      PDF_SECURITY_LIMITS.maxFilenameCharacters,
+                    ),
+                  )
+                }
+                spellCheck={false}
+                value={documentName}
+              />
+              <span className={styles.docStatus}>
+                <ShieldCheck size={13} />
+                Local draft · {snapshot.pages.length}{" "}
+                {snapshot.pages.length === 1 ? "page" : "pages"}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -2527,10 +2960,8 @@ export default function PdfEditorWorkspace({
             <button
               aria-label="Zoom out"
               className={styles.iconButton}
-              disabled={zoom <= 0.45}
-              onClick={() =>
-                setZoom((value) => clamp(value - 0.15, 0.4, 1.8))
-              }
+              disabled={zoom <= 0.1}
+              onClick={() => changeZoom(-0.15)}
               type="button"
             >
               <ZoomOut size={17} />
@@ -2539,31 +2970,58 @@ export default function PdfEditorWorkspace({
               {Math.round(zoom * 100)}%
             </span>
             <button
+              aria-label={`Fit ${
+                fitMode === "page" ? "page width" : "whole page"
+              }`}
+              aria-pressed={fitMode !== "custom"}
+              className={`${styles.fitButton} ${styles.iconButton}`}
+              onClick={toggleFitMode}
+              title={
+                fitMode === "page"
+                  ? "Fit page width"
+                  : "Fit whole page"
+              }
+              type="button"
+            >
+              <Maximize2 size={16} />
+              <span className={styles.fitLabel}>
+                {fitMode === "width"
+                  ? "Width"
+                  : fitMode === "page"
+                    ? "Page"
+                    : "Fit"}
+              </span>
+            </button>
+            <button
               aria-label="Zoom in"
               className={styles.iconButton}
-              disabled={zoom >= 1.8}
-              onClick={() =>
-                setZoom((value) => clamp(value + 0.15, 0.4, 1.8))
-              }
+              disabled={zoom >= 4}
+              onClick={() => changeZoom(0.15)}
               type="button"
             >
               <ZoomIn size={17} />
             </button>
           </div>
-          <button
-            className={styles.exportButton}
-            disabled={phase === "exporting"}
-            onClick={() => void exportPdf()}
-            type="button"
-          >
-            {phase === "exporting" ? (
-              <LoaderCircle size={18} />
-            ) : (
-              <Download size={18} />
-            )}
-            {phase === "exporting" ? "Exporting" : "Export PDF"}
-          </button>
         </div>
+        <button
+          aria-label={
+            phase === "exporting" ? "Exporting PDF" : "Export PDF"
+          }
+          className={styles.exportButton}
+          disabled={phase === "exporting"}
+          onClick={() => void exportPdf()}
+          ref={exportButtonRef}
+          type="button"
+        >
+          {phase === "exporting" ? (
+            <LoaderCircle size={18} />
+          ) : (
+            <Download size={18} />
+          )}
+          <span>
+            {phase === "exporting" ? "Exporting" : "Export PDF"}
+          </span>
+        </button>
       </header>
 
       {error ? (
@@ -2573,10 +3031,42 @@ export default function PdfEditorWorkspace({
       ) : null}
 
       <div className={styles.editorBody}>
-        <aside className={styles.pagesPanel} aria-label="Document pages">
+        {compactLayout && openPanel ? (
+          <button
+            aria-label="Close workspace panel"
+            className={styles.panelBackdrop}
+            onClick={() => setOpenPanel(null)}
+            type="button"
+          />
+        ) : null}
+        <aside
+          aria-hidden={pagesHidden}
+          aria-label="Document pages"
+          className={styles.pagesPanel}
+          data-open={openPanel === "pages"}
+          id="pdf-pages-panel"
+          inert={pagesHidden ? true : undefined}
+          onKeyDown={trapPanelFocus}
+          ref={pagesPanelRef}
+        >
           <div className={styles.panelHeader}>
-            <strong>Pages</strong>
-            <span className={styles.pageCount}>{snapshot.pages.length}</span>
+            <div className={styles.panelTitle}>
+              <strong>Pages</strong>
+              <span className={styles.pageCount}>
+                {snapshot.pages.length}
+              </span>
+            </div>
+            <button
+              aria-label={
+                compactLayout ? "Close pages" : "Collapse pages"
+              }
+              className={styles.panelClose}
+              data-panel-close
+              onClick={() => closeWorkspacePanel("pages")}
+              type="button"
+            >
+              <X size={19} />
+            </button>
           </div>
           <div className={styles.thumbnails}>
             {snapshot.pages.map((page, index) => (
@@ -2587,6 +3077,9 @@ export default function PdfEditorWorkspace({
                 key={page.id}
               >
                 <button
+                  aria-current={
+                    page.id === activePage.id ? "page" : undefined
+                  }
                   aria-label={`Open page ${index + 1}`}
                   className={styles.thumbCanvas}
                   onClick={() => {
@@ -2594,6 +3087,7 @@ export default function PdfEditorWorkspace({
                     finishTextEditing();
                     setActivePageId(page.id);
                     setSelectedId(null);
+                    if (compactLayout) setOpenPanel(null);
                   }}
                   type="button"
                 >
@@ -2662,65 +3156,179 @@ export default function PdfEditorWorkspace({
             Shift plus arrow keys to resize it, and Delete to remove it. Hold
             Alt for finer movement.
           </p>
-          <nav className={styles.toolRail} aria-label="Editing tools">
-            {mode === "organize" ? (
-              <p className={styles.organizeHint}>
-                Select a page thumbnail to move, rotate, or delete it.
-              </p>
-            ) : TOOL_ITEMS.map((item) => {
-              const Icon = item.icon;
-              const disabled =
-                item.id === "edit-text" &&
-                activePage.sourcePageIndex === null;
-              return (
-                <button
-                  aria-label={item.label}
-                  aria-pressed={tool === item.id}
-                  className={`${styles.toolButton} ${
-                    tool === item.id ? styles.toolActive : ""
-                  }`}
-                  disabled={disabled}
-                  key={item.id}
-                  onClick={() => selectTool(item.id)}
-                  title={
-                    disabled
-                      ? "Open a PDF with selectable text first"
-                      : item.label
-                  }
-                  type="button"
-                >
-                  <Icon size={18} />
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
-            {tool === "edit-text" ? (
-              <span
-                aria-live="polite"
-                className={styles.textDetectionBadge}
-                data-status={activeTextLayerStatus}
-                role="status"
-              >
-                {activeTextLayerStatus === "loading" ? (
-                  <LoaderCircle size={13} />
-                ) : activeTextLayerStatus === "ready" ? (
-                  <Check size={13} />
-                ) : (
-                  <FileText size={13} />
-                )}
-                {activeTextLayerStatus === "loading"
-                  ? "Detecting text"
-                  : activeTextLayerStatus === "ready"
-                    ? `${activeTextFragments.length} editable`
-                    : activeTextLayerStatus === "empty"
-                      ? "Scan / image"
-                      : "Detection issue"}
+          <div
+            aria-label="Document controls"
+            className={styles.mobileUtilityBar}
+            role="toolbar"
+          >
+            <button
+              aria-label="Open another PDF"
+              className={styles.iconButton}
+              onClick={() => pdfInputRef.current?.click()}
+              type="button"
+            >
+              <Upload size={18} />
+            </button>
+            <button
+              aria-label="Undo"
+              className={styles.iconButton}
+              disabled={!past.length}
+              onClick={undo}
+              type="button"
+            >
+              <Undo2 size={18} />
+            </button>
+            <button
+              aria-label="Redo"
+              className={styles.iconButton}
+              disabled={!future.length}
+              onClick={redo}
+              type="button"
+            >
+              <Redo2 size={18} />
+            </button>
+            <button
+              aria-label={`Fit ${
+                fitMode === "page" ? "page width" : "whole page"
+              }`}
+              aria-pressed={fitMode !== "custom"}
+              className={`${styles.iconButton} ${styles.fitButton}`}
+              onClick={toggleFitMode}
+              type="button"
+            >
+              <Maximize2 size={17} />
+              <span className={styles.fitLabel}>
+                {fitMode === "width" ? "Width" : "Page"}
               </span>
-            ) : null}
-          </nav>
+            </button>
+            <div className={styles.compactZoom}>
+              <button
+                aria-label="Zoom out"
+                className={styles.iconButton}
+                disabled={zoom <= 0.1}
+                onClick={() => changeZoom(-0.15)}
+                type="button"
+              >
+                <ZoomOut size={17} />
+              </button>
+              <span className={styles.zoomLabel}>
+                {Math.round(zoom * 100)}%
+              </span>
+              <button
+                aria-label="Zoom in"
+                className={styles.iconButton}
+                disabled={zoom >= 4}
+                onClick={() => changeZoom(0.15)}
+                type="button"
+              >
+                <ZoomIn size={17} />
+              </button>
+            </div>
+          </div>
+
+          <div className={styles.toolDock}>
+            <button
+              aria-controls="pdf-pages-panel"
+              aria-expanded={
+                compactLayout ? openPanel === "pages" : !pagesCollapsed
+              }
+              aria-label={`Pages, page ${activeIndex + 1} of ${
+                snapshot.pages.length
+              }`}
+              className={styles.panelToggle}
+              onClick={() => toggleWorkspacePanel("pages")}
+              ref={pagesToggleRef}
+              type="button"
+            >
+              <PanelLeft size={18} />
+              <span>
+                {activeIndex + 1}/{snapshot.pages.length}
+              </span>
+            </button>
+            <div
+              aria-label="Editing tools"
+              className={styles.toolRail}
+              role="toolbar"
+            >
+              {mode === "organize" ? (
+                <p className={styles.organizeHint}>
+                  Select a page thumbnail to move, rotate, or delete it.
+                </p>
+              ) : TOOL_ITEMS.map((item) => {
+                const Icon = item.icon;
+                const disabled =
+                  item.id === "edit-text" &&
+                  activePage.sourcePageIndex === null;
+                return (
+                  <button
+                    aria-label={item.label}
+                    aria-pressed={tool === item.id}
+                    className={`${styles.toolButton} ${
+                      tool === item.id ? styles.toolActive : ""
+                    }`}
+                    disabled={disabled}
+                    key={item.id}
+                    onClick={() => selectTool(item.id)}
+                    title={
+                      disabled
+                        ? "Open a PDF with selectable text first"
+                        : item.label
+                    }
+                    type="button"
+                  >
+                    <Icon size={18} />
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+              {tool === "edit-text" ? (
+                <span
+                  aria-live="polite"
+                  className={styles.textDetectionBadge}
+                  data-status={activeTextLayerStatus}
+                  role="status"
+                >
+                  {activeTextLayerStatus === "loading" ? (
+                    <LoaderCircle size={13} />
+                  ) : activeTextLayerStatus === "ready" ? (
+                    <Check size={13} />
+                  ) : (
+                    <FileText size={13} />
+                  )}
+                  {activeTextLayerStatus === "loading"
+                    ? "Detecting text"
+                    : activeTextLayerStatus === "ready"
+                      ? `${activeTextFragments.length} editable`
+                      : activeTextLayerStatus === "empty"
+                        ? "Scan / image"
+                        : "Detection issue"}
+                </span>
+              ) : null}
+            </div>
+            <button
+              aria-controls="pdf-properties-panel"
+              aria-expanded={
+                compactLayout
+                  ? openPanel === "properties"
+                  : !propertiesCollapsed
+              }
+              aria-label="Element properties"
+              className={styles.panelToggle}
+              onClick={() => toggleWorkspacePanel("properties")}
+              ref={propertiesToggleRef}
+              type="button"
+            >
+              <SlidersHorizontal size={18} />
+              <span>Props</span>
+            </button>
+          </div>
 
           <div className={styles.canvasViewport}>
-            <div className={styles.canvasScroller}>
+            <div
+              className={styles.canvasScroller}
+              onWheel={onCanvasWheel}
+              ref={canvasViewportRef}
+            >
               <div
                 className={styles.pageShell}
                 style={{
@@ -2737,7 +3345,11 @@ export default function PdfEditorWorkspace({
                 <div
                   aria-describedby="pdf-editor-keyboard-instructions"
                   aria-label={`Editable area for page ${activeIndex + 1}`}
-                  className={styles.overlaySurface}
+                  className={`${styles.overlaySurface} ${
+                    tool === "select" || tool === "edit-text"
+                      ? styles.panSurface
+                      : styles.directSurface
+                  }`}
                   onPointerCancel={finishInteraction}
                   onPointerDown={onSurfacePointerDown}
                   onPointerMove={onSurfacePointerMove}
@@ -2775,9 +3387,18 @@ export default function PdfEditorWorkspace({
           </div>
         </section>
 
-        <aside className={styles.inspector} aria-label="Element properties">
+        <aside
+          aria-hidden={propertiesHidden}
+          aria-label="Element properties"
+          className={styles.inspector}
+          data-open={openPanel === "properties"}
+          id="pdf-properties-panel"
+          inert={propertiesHidden ? true : undefined}
+          onKeyDown={trapPanelFocus}
+          ref={propertiesPanelRef}
+        >
           <div className={styles.inspectorHeader}>
-            <div>
+            <div className={styles.inspectorTitle}>
               <span>Inspector</span>
               <strong>
                 {selectedElement
@@ -2790,7 +3411,22 @@ export default function PdfEditorWorkspace({
                     : "Nothing selected"}
               </strong>
             </div>
-            {selectedElement ? <Check size={18} /> : null}
+            <div className={styles.inspectorHeaderActions}>
+              {selectedElement ? <Check size={18} /> : null}
+              <button
+                aria-label={
+                  compactLayout
+                    ? "Close properties"
+                    : "Collapse properties"
+                }
+                className={styles.panelClose}
+                data-panel-close
+                onClick={() => closeWorkspacePanel("properties")}
+                type="button"
+              >
+                <X size={19} />
+              </button>
+            </div>
           </div>
 
           {tool === "signature" && !selectedElement ? (
@@ -3195,7 +3831,7 @@ export default function PdfEditorWorkspace({
         </aside>
       </div>
 
-      <footer className={styles.statusBar}>
+      <footer aria-live="polite" className={styles.statusBar}>
         <span>{progress.label}</span>
         <div
           aria-label={`Progress ${progress.value}%`}

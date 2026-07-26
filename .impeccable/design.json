@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-26T16:30:00.000Z",
+  "title": "Design System: Pagelea",
+  "extensions": {
+    "colorMeta": {
+      "ink": {
+        "role": "neutral",
+        "displayName": "Workbench Ink",
+        "canonical": "#17221e",
+        "tonalRamp": ["#101713", "#17221e", "#2f3d37", "#56645e", "#85918c", "#b7c0bc", "#e1e6e3", "#f4f6f5"]
+      },
+      "green": {
+        "role": "primary",
+        "displayName": "Local Green",
+        "canonical": "#0f9f6e",
+        "tonalRamp": ["#052f21", "#07543a", "#087a54", "#0f9f6e", "#52bd94", "#93d9bd", "#c8f2df", "#ebfaf3"]
+      },
+      "blue": {
+        "role": "secondary",
+        "displayName": "Selection Blue",
+        "canonical": "#2d6fe8",
+        "tonalRamp": ["#10264f", "#17418b", "#1f59bd", "#2d6fe8", "#6a98ee", "#a6c0f5", "#d6e3fb", "#eff5ff"]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Pagelea Paper",
+        "canonical": "#fbfaf6",
+        "tonalRamp": ["#272722", "#4c4b43", "#747269", "#a09e94", "#c8c6bd", "#e4e2da", "#f2f0e9", "#fbfaf6"]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Clean Surface",
+        "canonical": "#ffffff",
+        "tonalRamp": ["#242424", "#494949", "#707070", "#9a9a9a", "#c2c2c2", "#e0e0e0", "#f3f3f3", "#ffffff"]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Pagelea Display",
+        "purpose": "Marketing and first-run moments only."
+      },
+      "body": {
+        "displayName": "Product Body",
+        "purpose": "All working controls, fields, status, and explanatory copy."
+      }
+    },
+    "shadows": [
+      {
+        "name": "control",
+        "value": "0 2px 0 rgba(23,34,30,0.06), 0 8px 24px rgba(23,34,30,0.06)",
+        "purpose": "Low ambient depth for actionable controls."
+      },
+      {
+        "name": "document",
+        "value": "0 22px 55px rgba(23,34,30,0.18)",
+        "purpose": "Strongest resting elevation, reserved for the PDF page."
+      },
+      {
+        "name": "overlay",
+        "value": "0 28px 80px rgba(35,55,47,0.14)",
+        "purpose": "Drawers and bottom sheets above the editor stage."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-fast",
+        "value": "160ms cubic-bezier(0.16,1,0.3,1)",
+        "purpose": "Tool selection, drawer state, and direct feedback."
+      }
+    ],
+    "breakpoints": [
+      { "name": "mobile", "value": "760px" },
+      { "name": "tablet", "value": "1120px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single dominant action in a workbench region.",
+      "html": "<button class=\"ds-btn-primary\">Export PDF</button>",
+      "css": ".ds-btn-primary{min-height:46px;border:1px solid var(--ink);border-radius:14px;background:var(--ink);padding:0 18px;color:var(--paper);font:790 .875rem/1 var(--font-body),sans-serif;transition:background-color 160ms ease,transform 160ms cubic-bezier(.16,1,.3,1)}.ds-btn-primary:hover{background:var(--green-dark);transform:translateY(-1px)}.ds-btn-primary:focus-visible{outline:3px solid color-mix(in oklch,var(--blue) 42%,transparent);outline-offset:3px}.ds-btn-primary:active{transform:none}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "A reversible or supporting action.",
+      "html": "<button class=\"ds-btn-secondary\">Open PDF</button>",
+      "css": ".ds-btn-secondary{min-height:46px;border:1px solid var(--line);border-radius:14px;background:var(--surface);padding:0 18px;color:var(--ink);font:760 .875rem/1 var(--font-body),sans-serif}.ds-btn-secondary:hover{border-color:#9ccbb5;background:#eef8f2}.ds-btn-secondary:focus-visible{outline:3px solid color-mix(in oklch,var(--blue) 42%,transparent);outline-offset:3px}"
+    },
+    {
+      "name": "Editor Field",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "A compact property or document field.",
+      "html": "<label class=\"ds-field\"><span>Filename</span><input value=\"document.pdf\" /></label>",
+      "css": ".ds-field{display:grid;gap:7px;color:#525d57;font:760 .75rem/1.3 var(--font-body),sans-serif}.ds-field input{min-height:44px;border:1px solid var(--line);border-radius:12px;background:var(--paper);padding:9px 10px;color:var(--ink);font:570 .875rem/1.3 var(--font-body),sans-serif}.ds-field input:focus{border-color:var(--blue);outline:3px solid color-mix(in oklch,var(--blue) 24%,transparent);outline-offset:1px}"
+    },
+    {
+      "name": "Tool Button",
+      "kind": "button",
+      "description": "A labelled editor tool with explicit selected state.",
+      "html": "<button class=\"ds-tool\" aria-pressed=\"true\"><svg aria-hidden=\"true\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M4 20h16M12 4v12M7 9l5-5 5 5\" /></svg><span>Add text</span></button>",
+      "css": ".ds-tool{display:grid;min-width:56px;min-height:48px;place-items:center;gap:3px;border:1px solid #8dccad;border-radius:11px;background:var(--mint);padding:4px 7px;color:var(--green-dark);font:760 .7rem/1.2 var(--font-body),sans-serif}.ds-tool:focus-visible{outline:3px solid color-mix(in oklch,var(--blue) 42%,transparent);outline-offset:2px}"
+    },
+    {
+      "name": "Status Chip",
+      "kind": "chip",
+      "description": "A quiet local-processing or detection state.",
+      "html": "<span class=\"ds-chip\"><svg aria-hidden=\"true\" width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"m5 12 4 4L19 6\" /></svg>Local draft</span>",
+      "css": ".ds-chip{display:inline-flex;min-height:30px;align-items:center;gap:6px;border:1px solid #9bceb5;border-radius:999px;background:#e8f7ef;padding:0 10px;color:#176342;font:780 .7rem/1 var(--font-body),sans-serif}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Quiet Workbench",
+    "overview": "Pagelea pairs an approachable public identity with restrained professional product chrome. The editor becomes quiet, dense, and predictable so the PDF remains the dominant object. Large screens keep context visible; narrow screens use explicit drawers and bottom sheets instead of stacking the application beneath the document.",
+    "keyCharacteristics": [
+      "Local-first confidence with restrained green state accents.",
+      "Neutral layered surfaces that separate navigation from document content.",
+      "Familiar editor geometry and consistent 4-pixel spacing increments.",
+      "Structural responsive changes instead of scaled-down desktop chrome.",
+      "Fast state transitions with no decorative product animation."
+    ],
+    "rules": [
+      {
+        "name": "The Document Colour Rule",
+        "body": "Green communicates readiness and privacy; blue communicates document selection.",
+        "section": "colors"
+      },
+      {
+        "name": "The Page-First Elevation Rule",
+        "body": "Nothing in the workbench may cast a stronger resting shadow than the PDF page except an open modal sheet or drawer.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do give the PDF the largest continuous viewport available.",
+      "Do keep coarse-pointer targets at least 44 by 44 CSS pixels.",
+      "Do preserve the same core capabilities across desktop, tablet, and mobile."
+    ],
+    "donts": [
+      "Don't ship a document editor embedded inside a marketing-page card or constrained canvas.",
+      "Don't stack desktop panels into a long scrolling page on mobile.",
+      "Don't rely on hover-dependent controls or hidden core functionality."
+    ]
+  }
+}

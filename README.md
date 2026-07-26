@@ -39,6 +39,8 @@ complex cases intentionally use a safe flattened fallback; see
 - **Open source:** the privacy boundary and transformation logic are
   inspectable.
 - **No account required:** open a tool, select a file, and download the result.
+- **Document-first editor:** a full-viewport workspace with fit-page zoom,
+  collapsible desktop panels, mobile sheets, and native touch pan and pinch.
 - **Self-contained:** PDF.js worker, CMaps, fonts, and WebAssembly helpers are
   served from the same application instead of a third-party CDN.
 - **Security bounded:** file sizes, pages, rendering, text, images, ZIP output,
@@ -48,7 +50,7 @@ complex cases intentionally use a safe flattened fallback; see
 
 | Tool | Route | What it does |
 | --- | --- | --- |
-| PDF Editor | `/tools/pdf-editor` | Replaces supported existing text and adds text, images, shapes, highlights, whiteout, freehand marks, signatures, and page operations. |
+| PDF Editor | `/tools/pdf-editor` | Uses an immersive desktop and mobile workspace to replace supported existing text and add text, images, shapes, highlights, whiteout, freehand marks, signatures, and page operations. |
 | Sign PDF | `/tools/sign-pdf` | Adds typed, drawn, or uploaded signatures and text. |
 | Merge PDF | `/tools/merge-pdf` | Combines ordered PDFs, JPGs, and PNGs. |
 | Organize PDF | `/tools/organize-pdf` | Reorders, rotates, removes, and adds pages. |
@@ -114,6 +116,7 @@ Important locations:
 | `app/components/ToolWorkspace.tsx` | Merge, split, optimize, conversion, and sanitization workflows |
 | `app/lib/pdf-actions.ts` | PDF transformations |
 | `app/lib/pdf-editor-export.ts` | Editor export path |
+| `app/lib/pdf-editor-viewport.ts` | Responsive fit-page and fit-width calculations |
 | `app/lib/pdf-security-limits.ts` | Canonical resource budgets |
 | `shared/public-tools.ts` | Public tool allowlist |
 | `worker/` | Edge routing, policy, and optional hosted APIs |
