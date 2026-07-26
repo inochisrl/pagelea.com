@@ -8,6 +8,13 @@ and this project follows
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-07-26
+
+### Performance
+
+- Removed the equivalent HTML font preload elements with Cloudflare's
+  streaming `HTMLRewriter`, so Unicode-range fonts load on demand.
+
 ## [0.2.1] - 2026-07-26
 
 ### Fixed
@@ -18,8 +25,7 @@ and this project follows
 
 ### Performance
 
-- Removed eager font hints that preloaded every hosted Unicode range even
-  though the browser only needs the ranges used by the current page.
+- Removed duplicate font preload hints from the HTTP `Link` header.
 
 ## [0.2.0] - 2026-07-26
 
