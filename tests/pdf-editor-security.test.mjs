@@ -4,7 +4,12 @@ import test from "node:test";
 import { URL } from "node:url";
 
 import { build } from "esbuild";
-import { PDFArray, PDFDocument, PDFName } from "pdf-lib";
+import {
+  PDFArray,
+  PDFDocument,
+  PDFName,
+  PDFPageTree,
+} from "pdf-lib";
 
 const exportSourceUrl = new URL(
   "../app/lib/pdf-editor-export.ts",
@@ -54,6 +59,25 @@ async function createDeepPageTreeFixture(depth = 6_000) {
   return document.save({ useObjectStreams: true });
 }
 
+async function createWidePageTreeReferenceFanoutFixture(
+  branches = 400,
+  referenceDepth = 251,
+) {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  document.addPage([100, 100]);
+  const kids = document.catalog.Pages().Kids();
+  let child = PDFName.of("Scalar");
+  for (let depth = 0; depth < referenceDepth; depth += 1) {
+    child = document.context.register(child);
+  }
+  for (let branch = 0; branch < branches; branch += 1) {
+    kids.push(child);
+  }
+  return document.save({ useObjectStreams: true });
+}
+
 async function createDeepPageGraphFixture(depth = 6_000) {
   const document = await PDFDocument.create({
     updateMetadata: false,
@@ -68,6 +92,92 @@ async function createDeepPageGraphFixture(depth = 6_000) {
     );
   }
   page.node.set(PDFName.of("DeepCarrier"), child);
+  return document.save({ useObjectStreams: true });
+}
+
+async function createDeepAliasedResourceGraphFixture(depth = 4_000) {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  const page = document.addPage([100, 100]);
+  let next = document.context.register(
+    document.context.obj({ Leaf: true }),
+  );
+  const references = [next];
+  for (let index = 1; index < depth; index += 1) {
+    next = document.context.register(
+      document.context.obj({ Child: next }),
+    );
+    references.push(next);
+  }
+
+  const resources = document.context.obj({});
+  resources.set(PDFName.of("Deep"), references.at(-1));
+  for (
+    let index = references.length - 1;
+    index >= 0;
+    index -= 1
+  ) {
+    resources.set(PDFName.of(`S${index}`), references[index]);
+  }
+  page.node.set(PDFName.of("Resources"), resources);
+  return document.save({ useObjectStreams: true });
+}
+
+async function createDeepPageParentBacklinkFixture(
+  depth = 15_000,
+) {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  const page = document.addPage([100, 100]);
+  let parentReference;
+  for (let index = 0; index < depth; index += 1) {
+    parentReference = document.context.register(
+      PDFPageTree.withContext(
+        document.context,
+        parentReference,
+      ),
+    );
+  }
+  page.node.set(PDFName.of("Parent"), parentReference);
+  return document.save({ useObjectStreams: true });
+}
+
+async function createCrossPageAliasedGraphFixture(
+  depth = 4_000,
+) {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  const shallowPage = document.addPage([100, 100]);
+  const deepPage = document.addPage([100, 100]);
+  let next = document.context.register(
+    document.context.obj({ Leaf: true }),
+  );
+  const references = [next];
+  for (let index = 1; index < depth; index += 1) {
+    next = document.context.register(
+      document.context.obj({ Child: next }),
+    );
+    references.push(next);
+  }
+
+  const shallowResources = document.context.obj({});
+  for (let index = 0; index < references.length; index += 1) {
+    shallowResources.set(
+      PDFName.of(`S${index}`),
+      references[index],
+    );
+  }
+  shallowPage.node.set(
+    PDFName.of("Resources"),
+    shallowResources,
+  );
+  deepPage.node.set(
+    PDFName.of("Resources"),
+    document.context.obj({ Deep: references.at(-1) }),
+  );
   return document.save({ useObjectStreams: true });
 }
 
@@ -242,6 +352,53 @@ test("editor export still copies a normal vector source page", async () => {
   assert.equal(output.getPageCount(), 1);
 });
 
+test("editor export allows a normal duplicate of a bounded wide source page", async () => {
+  const result = await editorExport.exportEditedPdf({
+    sourceBytes: await createWidePageGraphFixture(24_000),
+    pages: Array.from({ length: 2 }, (_, index) => ({
+      ...blankPage,
+      id: `page-${index + 1}`,
+      sourcePageIndex: 0,
+      sourceWidth: 100,
+      sourceHeight: 100,
+    })),
+    elements: [],
+    filename: "normal-wide-duplicate.pdf",
+  });
+  const output = await PDFDocument.load(
+    new Uint8Array(await result.blob.arrayBuffer()),
+    { updateMetadata: false },
+  );
+
+  assert.equal(output.getPageCount(), 2);
+});
+
+test(
+  "editor export applies an aggregate graph budget across repeated source-page copies",
+  { timeout: 15_000 },
+  async () => {
+    await assert.rejects(
+      editorExport.exportEditedPdf({
+        sourceBytes: await createWidePageGraphFixture(24_000),
+        pages: Array.from({ length: 5 }, (_, index) => ({
+          ...blankPage,
+          id: `page-${index + 1}`,
+          sourcePageIndex: 0,
+          sourceWidth: 100,
+          sourceHeight: 100,
+        })),
+        elements: [],
+        filename: "excessive-wide-duplicates.pdf",
+      }),
+      (error) =>
+        error instanceof Error &&
+        error.name === "PdfSecurityLimitError" &&
+        /object graph.*limit/i.test(error.message) &&
+        !/call stack|rangeerror/i.test(error.message),
+    );
+  },
+);
+
 for (const pageKey of [
   "AA",
   "AcroForm",
@@ -311,6 +468,34 @@ test(
 );
 
 test(
+  "editor export bounds page-tree reference fan-out before getPageCount",
+  { timeout: 15_000 },
+  async () => {
+    await assert.rejects(
+      editorExport.exportEditedPdf({
+        sourceBytes:
+          await createWidePageTreeReferenceFanoutFixture(),
+        pages: [
+          {
+            ...blankPage,
+            sourcePageIndex: 0,
+            sourceWidth: 100,
+            sourceHeight: 100,
+          },
+        ],
+        elements: [],
+        filename: "wide-page-tree-reference-fanout.pdf",
+      }),
+      (error) =>
+        error instanceof Error &&
+        error.name === "PdfSecurityLimitError" &&
+        /object graph.*limit/i.test(error.message) &&
+        !/call stack|rangeerror/i.test(error.message),
+    );
+  },
+);
+
+test(
   "editor export rejects deep page resources before copyPages recursion",
   { timeout: 15_000 },
   async () => {
@@ -329,6 +514,98 @@ test(
         filename: "deep-resource.pdf",
       }),
       { name: "PdfSecurityLimitError" },
+    );
+  },
+);
+
+test(
+  "editor export follows copier order when aliases precede a deep resource path",
+  { timeout: 15_000 },
+  async () => {
+    await assert.rejects(
+      editorExport.exportEditedPdf({
+        sourceBytes:
+          await createDeepAliasedResourceGraphFixture(),
+        pages: [
+          {
+            ...blankPage,
+            sourcePageIndex: 0,
+            sourceWidth: 100,
+            sourceHeight: 100,
+          },
+        ],
+        elements: [],
+        filename: "deep-aliased-resource.pdf",
+      }),
+      (error) =>
+        error instanceof Error &&
+        error.name === "PdfSecurityLimitError" &&
+        /object graph.*limit/i.test(error.message) &&
+        !/call stack|rangeerror/i.test(error.message),
+    );
+  },
+);
+
+test(
+  "editor export bounds a malicious page-parent backlink before inheritance recursion",
+  { timeout: 15_000 },
+  async () => {
+    await assert.rejects(
+      editorExport.exportEditedPdf({
+        sourceBytes:
+          await createDeepPageParentBacklinkFixture(),
+        pages: [
+          {
+            ...blankPage,
+            sourcePageIndex: 0,
+            sourceWidth: 100,
+            sourceHeight: 100,
+          },
+        ],
+        elements: [],
+        filename: "deep-page-parent-backlink.pdf",
+      }),
+      (error) =>
+        error instanceof Error &&
+        error.name === "PdfSecurityLimitError" &&
+        /object graph.*limit/i.test(error.message) &&
+        !/call stack|rangeerror/i.test(error.message),
+    );
+  },
+);
+
+test(
+  "editor export resets graph ownership for every separately copied page",
+  { timeout: 15_000 },
+  async () => {
+    await assert.rejects(
+      editorExport.exportEditedPdf({
+        sourceBytes:
+          await createCrossPageAliasedGraphFixture(),
+        pages: [
+          {
+            ...blankPage,
+            id: "page-1",
+            sourcePageIndex: 0,
+            sourceWidth: 100,
+            sourceHeight: 100,
+          },
+          {
+            ...blankPage,
+            id: "page-2",
+            sourcePageIndex: 1,
+            sourceWidth: 100,
+            sourceHeight: 100,
+          },
+        ],
+        elements: [],
+        filename: "cross-page-aliased-graph.pdf",
+      }),
+      (error) =>
+        error instanceof Error &&
+        error.name === "PdfSecurityLimitError" &&
+        /object graph.*limit/i.test(error.message) &&
+        !/call stack|rangeerror/i.test(error.message),
     );
   },
 );

@@ -13,6 +13,8 @@ const [
   privateRewriteSource,
   privateRewriteCss,
   localOcrSource,
+  focusedTextEditorSource,
+  focusedTextEditorCss,
 ] = await Promise.all([
   readFile(
     new URL("app/components/PdfEditorWorkspace.tsx", projectRoot),
@@ -37,6 +39,14 @@ const [
     "utf8",
   ),
   readFile(new URL("app/lib/pdf-local-ocr.ts", projectRoot), "utf8"),
+  readFile(
+    new URL("app/components/TextEditFocusPanel.tsx", projectRoot),
+    "utf8",
+  ),
+  readFile(
+    new URL("app/components/TextEditFocusPanel.module.css", projectRoot),
+    "utf8",
+  ),
 ]);
 
 test("editor uses an immersive, viewport-owned application shell", () => {
@@ -145,7 +155,7 @@ test("editor fits the page responsively and preserves touch navigation", () => {
   assert.match(editorCss, /\.resizeHandle::before\s*\{[\s\S]*?inset:\s*-15px;/);
   assert.match(editorSource, /aria-current=\{/);
   assert.match(editorSource, /role="toolbar"/);
-  assert.match(editorSource, /<footer aria-live="polite"/);
+  assert.match(editorSource, /<footer[\s\S]*?aria-live="polite"/);
 });
 
 test("editor exposes a coherent keyboard interaction contract", () => {
@@ -162,12 +172,187 @@ test("editor exposes a coherent keyboard interaction contract", () => {
   assert.match(editorSource, /aria-pressed=\{selected\}/);
   assert.match(editorSource, /event\.shiftKey[\s\S]*?updateElement/);
 
+  const undoBranchStart = editorSource.indexOf(
+    "const command = event.metaKey || event.ctrlKey",
+  );
   const undoBranch = editorSource.slice(
-    editorSource.indexOf("const command = event.metaKey || event.ctrlKey"),
-    editorSource.indexOf('event.key === "Escape"'),
+    undoBranchStart,
+    editorSource.indexOf('if (event.key === "Escape")', undoBranchStart),
   );
   assert.match(undoBranch, /event\.key\.toLowerCase\(\) === "z"/);
   assert.match(undoBranch, /!isEditableTarget\(event\.target\)/);
+});
+
+test("mobile existing-text editing is focused, accessible, and transactional", () => {
+  assert.match(focusedTextEditorSource, /role="dialog"/);
+  assert.match(focusedTextEditorSource, /aria-modal="true"/);
+  assert.match(focusedTextEditorSource, />Original</);
+  assert.match(focusedTextEditorSource, />New text</);
+  assert.match(focusedTextEditorSource, /Nothing changes until you/);
+  assert.match(focusedTextEditorSource, /onCancel/);
+  assert.match(focusedTextEditorSource, /onApply/);
+  assert.match(focusedTextEditorSource, /trapDialogFocus/);
+  assert.match(focusedTextEditorSource, /inputRef\.current\?\.select\(\)/);
+  assert.match(focusedTextEditorSource, /errorMessage/);
+  assert.match(focusedTextEditorSource, /role="alert"/);
+  assert.match(
+    focusedTextEditorSource,
+    /focused-text-editor-description focused-text-editor-error/,
+  );
+  assert.match(
+    focusedTextEditorCss,
+    /\.field textarea\s*\{[\s\S]*?font-size:\s*18px;/,
+  );
+  assert.match(
+    focusedTextEditorCss,
+    /\.actions button\s*\{[\s\S]*?min-height:\s*48px;/,
+  );
+  assert.match(focusedTextEditorCss, /env\(safe-area-inset-bottom\)/);
+  assert.match(focusedTextEditorCss, /max-height:\s*min\(78dvh,\s*680px\)/);
+  assert.match(
+    focusedTextEditorCss,
+    /@media \(max-height: 520px\) and \(orientation: landscape\)/,
+  );
+  assert.match(
+    focusedTextEditorCss,
+    /@media \(max-height: 520px\) and \(orientation: landscape\)[\s\S]*?height:\s*104px;/,
+  );
+
+  assert.match(
+    editorSource,
+    /if \(compactLayout \|\| preferFocusedEditor\)\s*\{[\s\S]*?openFocusedTextEditor\(element,\s*"create",\s*trigger\);[\s\S]*?return;/,
+  );
+  assert.match(editorSource, /FocusedTextEditIntent/);
+  assert.match(editorSource, /applyFocusedTextReplacement/);
+  assert.match(
+    editorSource,
+    /function openFocusedTextEditor[\s\S]*?setFitMode\("custom"\)/,
+  );
+  assert.match(editorSource, /inert=\{focusedTextEdit \? true : undefined\}/);
+  assert.match(
+    editorSource,
+    /focusedTextEdit !== null \|\|[\s\S]*?fitMode === "custom"/,
+  );
+  assert.match(
+    editorSource,
+    /outcome === "applied" && next === before[\s\S]*?return;/,
+  );
+  assert.match(
+    editorSource,
+    /outcome === "missing"[\s\S]*?select the source text again/,
+  );
+  assert.match(
+    editorSource,
+    /focusedTextEditError[\s\S]*?setFocusedTextEditError\(message\)/,
+  );
+  assert.match(
+    editorSource,
+    /tool === "edit-text"[\s\S]*?element\.sourceText[\s\S]*?touchTextTargetRef\.current/,
+  );
+  assert.match(
+    editorSource,
+    /tool === "edit-text"[\s\S]*?openFocusedTextEditor\([\s\S]*?"update"/,
+  );
+  assert.match(
+    editorSource,
+    /event\.key === "Enter" \|\| event\.key === " "[\s\S]*?tool === "edit-text"[\s\S]*?openFocusedTextEditor\([\s\S]*?"update"/,
+  );
+  assert.match(editorSource, /data-editor-element-id=\{element\.id\}/);
+  assert.match(
+    editorSource,
+    /resultElement \?\? editorHeadingRef\.current[\s\S]*?focus\(\{ preventScroll: true \}\)/,
+  );
+  assert.match(
+    editorSource,
+    /error && !focusedTextEdit[\s\S]*?role="alert"/,
+  );
+  assert.match(
+    editorSource,
+    /if \(actions\.focusedTextEditing\)\s*\{[\s\S]*?event\.key === "Escape"[\s\S]*?actions\.cancelFocusedTextEditing\(\);[\s\S]*?return;[\s\S]*?\}\s*const command = event\.metaKey \|\| event\.ctrlKey/,
+    "the focused editor must isolate document-level undo, redo, and deletion shortcuts",
+  );
+});
+
+test("vector duplicate detection shares one fail-closed page budget", () => {
+  const rewriteSource = exportSource.slice(
+    exportSource.indexOf("function rewrittenSourcePageContents"),
+    exportSource.indexOf("function resolvePdfReferenceChain"),
+  );
+  assert.match(
+    rewriteSource,
+    /const duplicateSearchBudget:[\s\S]*?MAX_VECTOR_TEXT_REWRITE_DUPLICATE_SEARCH_WORK/,
+  );
+  assert.match(
+    rewriteSource,
+    /evidenceSupportsVectorRewrite\([\s\S]*?duplicateSearchBudget[\s\S]*?\)[\s\S]*?unselectedTextContainsEquivalentTarget\([\s\S]*?duplicateSearchBudget/,
+    "evidence and raw-operation checks must consume the same per-page budget",
+  );
+
+  const searchSource = exportSource.slice(
+    exportSource.indexOf("function containsEquivalentTextSequence"),
+    exportSource.indexOf("function skipPdfWhitespaceAndComments"),
+  );
+  assert.match(
+    searchSource,
+    /budget:\s*VectorDuplicateSearchBudget/,
+  );
+  assert.doesNotMatch(
+    searchSource,
+    /let searchWork\s*=/,
+    "individual targets must not reset duplicate-search work",
+  );
+});
+
+test("source-text preview repair stays fixed and touch gestures win over moving", () => {
+  assert.match(editorSource, /function renderSourceTextPreviewMask/);
+  assert.match(editorSource, /sourceText\.originalX/);
+  assert.match(editorSource, /sourceText\.originalY/);
+  assert.match(editorSource, /sourceText\.originalWidth/);
+  assert.match(editorSource, /sourceText\.originalHeight/);
+  assert.match(editorSource, /data-source-text-mask=/);
+  assert.match(
+    editorSource,
+    /background:\s*element\.sourceText[\s\S]*?\?\s*"transparent"/,
+  );
+  assert.match(
+    editorSource,
+    /activePageElements\.map\(renderSourceTextPreviewMask\)[\s\S]*?activePageElements\.map\(renderElement\)/,
+  );
+  assert.match(
+    editorCss,
+    /\.sourceTextPreviewMask\s*\{[\s\S]*?z-index:\s*2;[\s\S]*?pointer-events:\s*none;/,
+  );
+  assert.match(
+    editorSource,
+    /event\.pointerType === "touch"[\s\S]*?dataset\.touchMoveHandle[\s\S]*?touchTextTargetRef\.current/,
+  );
+  assert.match(
+    editorSource,
+    /function activateEditorElement[\s\S]*?selectedId === element\.id[\s\S]*?openFocusedTextEditor[\s\S]*?setSelectedId\(element\.id\)/,
+  );
+  assert.match(
+    editorSource,
+    /onClick=\{\(event\) => \{[\s\S]*?event\.detail !== 0[\s\S]*?activateEditorElement\(element,\s*event\.currentTarget,\s*true\)/,
+  );
+  assert.match(editorSource, /data-touch-move-handle="true"/);
+  assert.match(editorSource, /data-edge-x=\{moveHandleHorizontalEdge\}/);
+  assert.match(editorSource, /data-edge-y=\{moveHandleVerticalEdge\}/);
+  assert.match(
+    editorCss,
+    /\.moveHandle::before\s*\{[\s\S]*?inset:\s*-6px;/,
+  );
+  assert.match(
+    editorCss,
+    /@media \(max-width: 1120px\), \(pointer: coarse\)[\s\S]*?\.existingTextTarget::before\s*\{[\s\S]*?width:\s*max\(44px,\s*100%\);[\s\S]*?height:\s*max\(44px,\s*100%\);/,
+  );
+  assert.match(
+    editorCss,
+    /\.moveHandle\[data-edge-x="right"\][\s\S]*?right:\s*8px;/,
+  );
+  assert.match(
+    editorCss,
+    /\.moveHandle\[data-edge-y="top"\][\s\S]*?top:\s*8px;/,
+  );
 });
 
 test("signing copy and export preview stay within implemented capabilities", () => {

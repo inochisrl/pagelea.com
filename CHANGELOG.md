@@ -8,6 +8,39 @@ and this project follows
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-07-27
+
+### Security
+
+- Detect case-variant whole-word copies and source text reconstructed from
+  complete `Tj` or PDF.js fragments even when those fragments are reordered or
+  separated by decoys. Both evidence and raw-operation checks consume one
+  fail-closed, page-wide work budget.
+- Traverse copied page graphs iteratively in pdf-lib's copier order and bound
+  malicious `/Parent` inheritance chains before pdf-lib can recurse through
+  them.
+- Apply one aggregate copy-work budget across every source-page occurrence,
+  including duplicated pages, while retaining per-copy depth, entry, object,
+  and reference limits.
+- Charge page-tree dereferences, indirect-object roots, nested ownership
+  entries, and ownership reference chains to explicit graph budgets before
+  expensive copy or obsolete-stream cleanup work begins.
+
+### Fixed
+
+- Replaced the cramped mobile inline text field with a focus-managed,
+  transactional bottom sheet. Cancel leaves the document and undo history
+  untouched; confirm creates or updates exactly one replacement, and a rejected
+  over-limit change keeps its draft and error visible.
+- Anchored the preview repair mask to immutable source-text geometry, so moving
+  a replacement can no longer reveal the original and appear to duplicate it.
+- Let touch pan and pinch gestures begin over replaced text. The first tap
+  selects a replacement, the second opens its focused editor, and moving uses
+  an explicit edge-aware handle with a 44 px touch target.
+- Added synthetic-click activation and complete modal isolation for assistive
+  technology, including isolation from document undo, redo, and delete
+  shortcuts.
+
 ## [0.4.1] - 2026-07-27
 
 ### Security
@@ -15,8 +48,8 @@ and this project follows
 - Require bounded PDF.js text-layer evidence before any native vector rewrite,
   including exact raw-operation correspondence and immutable, unrotated source
   geometry. Missing or conflicting evidence forces the raster fallback.
-- Reject fragmented or case-variant duplicates even when their `Tj` operators
-  are reordered or interleaved with unrelated text.
+- Reject case-variant duplicates and copies reconstructed from consecutive,
+  complete `Tj` fragments.
 - Reject malformed `Tj` calls with extra operands and any string operand
   consumed by an unreviewed operator, including strings nested in arrays or
   dictionaries.
@@ -32,11 +65,11 @@ and this project follows
   or active entries fail closed to the static raster path.
 - Bound page-object graph entries as well as unique containers, avoiding wide
   graph expansion before the raster fallback.
-
 ### Fixed
 
 - Prevented `v0.4.0` from retaining a complete or partial old text layer in
-  adversarial PDFs that interleave, change the case of, or alias source text.
+  adversarial PDFs that use adjacent split fragments, change the case of, or
+  alias source text.
   Version 0.4.1 supersedes that deployed release.
 
 ## [0.4.0] - 2026-07-27

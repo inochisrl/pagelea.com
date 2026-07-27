@@ -1,14 +1,14 @@
-# Pagelea 0.4.1 Security and Release Review
+# Pagelea 0.4.2 Security and Release Review
 
 - **Review date:** 2026-07-27
 - **Owner:** Inochi SRL
-- **Target:** Pagelea Community 0.4.1
+- **Target:** Pagelea Community 0.4.2
 - **Licence:** AGPL-3.0-or-later
 - **Scope:** the current release-candidate source tree
 
 ## Executive summary
 
-Pagelea 0.4.1 is a free and open-source, browser-based PDF workbench. Its
+Pagelea 0.4.2 is a free and open-source, browser-based PDF workbench. Its
 published document workflows process selected files in the user's browser.
 The application has no document-upload endpoint, cloud document library,
 consumer account API, checkout, subscription, entitlement, payment webhook, or
@@ -29,7 +29,7 @@ fallback.
 The repository is already public. Its reachable history contains a retired
 `MEMORY.md` file in nine older commits; the file is absent from the current
 tree, remains ignored, and the complete reachable-history scan found no secret.
-A history rewrite cannot retract that prior exposure and is **not** a 0.4.1
+A history rewrite cannot retract that prior exposure and is **not** a 0.4.2
 release prerequisite. It remains separately tracked governance debt: any future
 rewrite requires explicit owner approval and a verified, access-controlled
 backup before public refs are changed.
@@ -67,11 +67,11 @@ The review covered:
 - dependency advisories, source leakage, GitHub Actions, CodeQL, Dependabot,
   SBOM generation, and public-history requirements.
 
-### Private Rewrite 0.4.1 review delta
+### Private Rewrite 0.4.2 review delta
 
-Version 0.4.1 retains the local English/Italian OCR, reviewed Unicode export
-fonts, and font matching introduced in 0.4.0, and closes several fail-closed
-validation gaps found after that release. The review additionally covered:
+Version 0.4.2 retains the local English/Italian OCR, reviewed Unicode export
+fonts, and font matching introduced in 0.4.0. It builds on the fail-closed
+vector rewrite released in 0.4.1 and adds the following review coverage:
 
 - fixed same-origin Tesseract worker, WebAssembly, language-model, and font
   paths with `workerBlobURL: false` and no document-upload fallback;
@@ -90,13 +90,20 @@ validation gaps found after that release. The review additionally covered:
   reviewed non-visual page payload entries before any vector page copy;
 - complete bounded PDF.js text-layer evidence, immutable selected-fragment
   matching, and geometric overlap rejection before a vector rewrite;
-- conservative case-folded duplicate-text detection across operation and
-  fragment boundaries, plus alias checks for old content streams throughout
-  the copied page graph;
+- bounded case-folded whole-word and whole-fragment duplicate detection, with
+  one page-wide work budget shared by evidence and raw-operation checks, plus
+  alias checks for old content streams reached through the copied page graph;
 - a reviewed allowlist for copied page-dictionary keys and byte-exact
   concatenation of multiple content streams;
 - exact one-string `Tj` operand validation, rejection of unconsumed nested
   strings, and reviewed content-stream dictionary forms that exclude cycles;
+- root and nested-entry charging for obsolete-content ownership traversal,
+  including PDFs with large sets of orphan indirect scalar objects;
+- copier-order page-graph traversal with fresh ownership per copied page and
+  iterative bounds for malicious inherited `/Parent` backlinks;
+- transactional mobile existing-text editing whose Cancel and rejected-limit
+  paths preserve the document, undo history, and draft, while the open dialog
+  isolates document undo, redo, and delete shortcuts;
 - the narrow `wasm-unsafe-eval` CSP capability required by the pinned local
   Tesseract core, without adding general `unsafe-eval` or remote script
   origins.
@@ -199,6 +206,8 @@ Central limits include:
 - at most 2,000 editor elements, with per-page, text, stroke, image, and pixel
   budgets;
 - iterative PDF object-graph traversal capped by depth and node count;
+- indirect-object roots and nested graph entries charged to the same traversal
+  budget before obsolete content streams can be deleted;
 - bounded page-metadata and thumbnail concurrency;
 - bounded ZIP entry and ZIP32 output paths.
 
@@ -245,16 +254,16 @@ also requires a local `Tf` selection that resolves to a verified page font;
 requires complete, bounded PDF.js text-layer evidence for the page. Selected
 evidence text and geometry must match the immutable source fragment, and every
 other searchable fragment must have valid geometry and remain outside the
-edited source rectangle. A bounded, case-folded sequence check rejects an
-equivalent duplicate aligned to text-operation or PDF.js-fragment boundaries,
-including duplicates split across adjacent operations. Old `/Contents`
-objects must not remain reachable through aliases in the copied page graph;
-aliases through copied page objects, inherited resources, or unreviewed
-content-stream dictionaries force the raster path. Content shared with
-another copied page remains live for that page and is not deleted. Marked
-content is rejected as a class so escaped `/ActualText` names or external
-marked-content properties cannot leave an alternative copy of the replaced
-text behind.
+edited source rectangle. A bounded case-folded guard rejects a whole-word
+target within another fragment and duplicates reconstructed from complete
+fragments, while avoiding the false equivalence between a containing word such
+as `Subtotal` and `Total`. Copied page keys and inherited resources must not
+alias an old `/Contents` object; unreviewed content-stream dictionaries
+independently force the raster path. The graph validator follows pdf-lib's
+recursive copy order with a fresh visited set per copied page and resolves
+inherited `/Parent` chains iteratively. Marked content is rejected as a class
+so escaped `/ActualText` names or external marked-content properties cannot
+leave an alternative copy of the replaced text behind.
 
 Flate decoding uses streaming `pako` output with a hard decoded-byte ceiling.
 The decoder stops when the remaining page budget would be exceeded rather than
@@ -351,30 +360,27 @@ The current checks produced:
 | --- | --- |
 | Clean install on Node 22.13.0 / npm 11.17.0 | Passed; dependency patch reapplied |
 | Production-only `npm ci --omit=dev` | Passed; dependency patch reapplied and 7 focused runtime tests passed |
-| Full production build and test suite | 238 passed, 0 failed |
+| Full production build and test suite | 253 passed, 0 failed |
 | TypeScript and ESLint | Passed |
 | `npm audit --audit-level=low` | 0 vulnerabilities |
 | `npm audit --omit=dev --audit-level=low` | 0 vulnerabilities |
 | Dependency licence metadata | 388 packages reviewed |
 | Private Rewrite assets and retained licences | 27 assets, 4 worker-bundle components, and 9 licences verified |
-| Deterministic CycloneDX SBOM | Passed; root is Pagelea 0.4.1 / AGPL-3.0-or-later |
-| Real Chromium OCR/edit/export smoke test | Passed; worker, WASM, `eng`, `ita`, and export font served same-origin with HTTP 200; no console or failed-response finding |
-| Export inspection | OCR replacement removed the old searchable text; Unicode LGC/Japanese/Hebrew/Arabic output rendered and extracted correctly |
+| Deterministic CycloneDX SBOM | Passed; root is Pagelea 0.4.2 / AGPL-3.0-or-later |
+| Real Chromium mobile edit/export smoke test | Passed in portrait and landscape; Cancel preserved history, Replace created one element and fixed source mask, touch re-entry worked, and focus returned to the replacement |
+| Export inspection | Original source text was absent; the replacement and unedited line remained searchable. Automated Unicode LGC/Japanese/Hebrew/Arabic extraction tests passed |
 | `git diff --check` | Passed |
 | Gitleaks full reachable history scan | Passed on all reachable refs, no finding |
 | Historical D1 migration split and SQLite integrity exercise | Passed |
 
 An advisory or secret scan is point-in-time evidence, not proof that every
-dependency or blob is safe. The 0.4.1 release must publish the Linux CI SBOM
+dependency or blob is safe. The 0.4.2 release must publish the Linux CI SBOM
 and checksums produced from the exact public commit and must enable repository
 secret scanning, push protection, private vulnerability reporting, branch
 protection, and required CI checks.
 
-The immutable 0.4.0 release attached a dependency SBOM generated on macOS
-rather than the different Linux SBOM emitted by its final main-branch CI run.
-Version 0.4.1 therefore accepts only the downloaded artifact from the final
-Linux CI run, records its SHA-256 in release provenance, and publishes that
-exact file.
+Version 0.4.2 accepts only the downloaded SBOM artifact from the final Linux CI
+run, records its SHA-256 in release provenance, and publishes that exact file.
 
 The repository currently has one eligible maintainer. CODEOWNER approval is
 therefore temporarily waived because GitHub does not permit self-approval.
@@ -393,7 +399,7 @@ The already-public history contains a retired maintainer-memory file in nine
 older commits. It is absent from the current tree, remains ignored, and the
 complete reachable history scan found no secret. Rewriting a repository that
 is already public cannot retract prior exposure and would invalidate existing
-clones, tags, and source links, so it is not a 0.4.1 release prerequisite.
+clones, tags, and source links, so it is not a 0.4.2 release prerequisite.
 
 This remains governance debt. Any future history rewrite requires a verified
 access-controlled backup, independent review of every ref and release artifact,
@@ -457,7 +463,7 @@ independently verified scheduled job.
 
 ## Release decision
 
-Pagelea Community 0.4.1 is suitable for a public free/open-source beta only
+Pagelea Community 0.4.2 is suitable for a public free/open-source beta only
 after all of the following are true for the exact release commit:
 
 - the current CI build, tests, audits, CodeQL, and SBOM checks pass;
@@ -474,5 +480,5 @@ Subject to those operational gates, the reviewed tree has no known P0 or P1
 code blocker. This approval does not expand the API surface, authorize document
 uploads, certify secure redaction, or authorize a future history rewrite. The
 already-public maintainer-memory file remains documented governance debt, not a
-0.4.1 release prerequisite. Version 0.4.1 contains no D1 schema migration; the
+0.4.2 release prerequisite. Version 0.4.2 contains no D1 schema migration; the
 historical destructive migration and its recovery requirements are unchanged.

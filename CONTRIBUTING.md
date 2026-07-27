@@ -44,15 +44,33 @@ npm run lint
 npm run typecheck
 npm audit --audit-level=low
 npm audit --omit=dev --audit-level=low
+npm run licenses:check
 npm run assets:check
 npm test
-npm run sbom -- > /tmp/pagelea-sbom.cdx.json
+npm run --silent sbom > /tmp/pagelea-sbom.cdx.json
+npm run --silent sbom > /tmp/pagelea-sbom-repeat.cdx.json
+cmp -s /tmp/pagelea-sbom.cdx.json /tmp/pagelea-sbom-repeat.cdx.json
+rm /tmp/pagelea-sbom-repeat.cdx.json
 git diff --check
 ```
 
 `npm test` performs a production build before executing the test suite.
 `npm run assets:check` independently verifies the pinned Private Rewrite
 workers, models, fonts, hashes, provenance, and retained licences.
+`npm run licenses:check` rejects dependencies without reviewed licence
+metadata. Generating and comparing the SBOM twice verifies deterministic
+output.
+
+In a second clean checkout, reproduce the production-only install gate:
+
+```bash
+npm ci --omit=dev
+npm ls --omit=dev patch-package tesseract.js
+node --test tests/tesseract-bootstrap-patch.test.mjs
+```
+
+This confirms that the locked Tesseract patch applies without development
+dependencies and that the seven focused runtime tests pass.
 
 ## Pull-request expectations
 

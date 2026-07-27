@@ -5,7 +5,7 @@ lets a user recognize text in an image-only or mixed PDF page, select a
 recognized line, rewrite it, and export searchable replacement text without
 sending the document to Pagelea or an OCR provider.
 
-This document describes version 0.4.1. It is a support contract, not a claim
+This document describes version 0.4.2. It is a support contract, not a claim
 that arbitrary PDF content can be edited losslessly.
 
 ## Workflow
@@ -15,7 +15,9 @@ that arbitrary PDF content can be edited losslessly.
 3. Choose English, Italian, or English + Italian in **Private Rewrite**.
 4. Select **Recognize text**. Recognition runs against a bounded local render
    of the active page and can be cancelled.
-5. Select an outlined native or OCR-derived text line and edit it.
+5. Select an outlined native or OCR-derived text line and edit it. On mobile,
+   a focused sheet shows the original and a draft; **Cancel** makes no change
+   and **Replace text** commits one undoable operation.
 6. Export, then compare the result with the original document.
 
 Native text extraction still runs first. On mixed pages, OCR results that
@@ -57,7 +59,7 @@ path-traversing assets. Licences are retained under
 | Per-page recognition | Supported |
 | Progress and cancellation | Supported |
 | Rotation, handwriting, tables, or arbitrary layouts | Best effort; verify manually |
-| Other recognition languages | Not included in version 0.4.1 |
+| Other recognition languages | Not included in version 0.4.2 |
 
 OCR accuracy depends on resolution, contrast, skew, rotation, typography, and
 layout. A recognized line is an editable geometry estimate, not proof of the
@@ -85,7 +87,7 @@ characters, fall back to an operating-system font, or convert unsupported text
 to an unsearchable image.
 
 Pure Arabic and Hebrew runs are positioned right-to-left and preserve exact
-text extraction within the supported matrix. Version 0.4.1 does not provide a
+text extraction within the supported matrix. Version 0.4.2 does not provide a
 general Unicode bidirectional-layout or complex-script shaping engine.
 
 Source-font correspondence is heuristic. Pagelea normalizes the font names
@@ -99,6 +101,10 @@ OCR lines often contain only a weak font-family hint.
 - A compatible native text edit neutralizes the original text-show operand
   while retaining the original PDF page, unrelated searchable text, images,
   and vectors.
+- The editor preview masks the immutable source rectangle independently from
+  the movable replacement. Moving the new text therefore cannot uncover a
+  second copy of the original; export cleanup uses the same immutable source
+  geometry.
 - An OCR-derived edit first repairs the selected pixels, then rasterizes the
   affected source page and draws searchable replacement text over the clean
   page image. The old scan pixels are not retained beneath the replacement.
@@ -110,11 +116,15 @@ OCR lines often contain only a weak font-family hint.
   printable-ASCII `Tj` strings with exactly one string operand. It rejects
   unconsumed or nested string operands, `ExtGState` font changes, non-printable
   bytes, positioned `TJ` arrays, quote operators, multi-operation text blocks,
-  and duplicate semantic text on the page. Pagelea also requires bounded
-  PDF.js text-layer evidence whose text and geometry match the immutable source,
+  and duplicate semantic text on the page. The duplicate guard is case-folded
+  and detects semantic substrings plus whole source fragments that were split,
+  reordered, or separated by decoys, while treating a containing word such as
+  `Subtotal` as distinct from `Total`. Pagelea also requires bounded PDF.js
+  text-layer evidence whose text and geometry match the immutable source,
   rejects any unselected fragment overlapping an edited source rectangle, and
   verifies that no copied page object or content-stream dictionary aliases the
-  old content streams.
+  old content streams. Page-object traversal follows the actual copier order
+  and bounds indirect references, entries, and inherited `/Parent` chains.
 - Replacement wrapping is word-aware and grapheme-safe. Text that cannot fit
   inside the selected box fails with an explicit overflow error.
 - Font assets are reused within one export. Supported faces are embedded as
@@ -181,7 +191,9 @@ The release gate covers:
   matrix;
 - same-origin network inspection, CSP enforcement, asset hashes, licences,
   dependency audits, and SBOM generation;
-- desktop, phone portrait, and phone landscape editor behavior.
+- desktop, phone portrait, and phone landscape editor behavior;
+- mobile Cancel/Replace history behavior, fixed source masks, and touch
+  pan/pinch beginning over replacement text.
 
 This verification reduces known regressions; it does not make OCR infallible or
 turn Pagelea into a general-purpose PDF content-stream authoring system.
