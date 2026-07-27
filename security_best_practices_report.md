@@ -328,7 +328,7 @@ The current checks produced:
 | --- | --- |
 | Clean install on Node 22.13.0 / npm 11.17.0 | Passed; dependency patch reapplied |
 | Production-only `npm ci --omit=dev` | Passed; dependency patch reapplied and 7 focused runtime tests passed |
-| Full production build and test suite | 212 passed, 0 failed |
+| Full production build and test suite | 213 passed, 0 failed |
 | TypeScript and ESLint | Passed |
 | `npm audit --audit-level=low` | 0 vulnerabilities |
 | `npm audit --omit=dev --audit-level=low` | 0 vulnerabilities |
