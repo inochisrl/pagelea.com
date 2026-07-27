@@ -374,8 +374,8 @@ test("bounds raster volume without silently dropping below 72 DPI", () => {
       minimumPixels - 1,
     ),
     {
-      code: "editor-raster-pixels-too-large",
-      maximum: policy.maxEditorRasterCanvasPixelsTotal,
+      code: "editor-raster-fidelity-too-low",
+      maximum: 72,
     },
   );
 });

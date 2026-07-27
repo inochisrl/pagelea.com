@@ -219,6 +219,14 @@ test("Private Rewrite exposes local OCR, cancellation, and mobile-safe controls"
   assert.match(localOcrSource, /workerBlobURL:\s*false/);
   assert.match(localOcrSource, /gzip:\s*false/);
   assert.match(
+    exportSource,
+    /loadPdfPreview\(\s*input\.sourceBytes,\s*\{\s*signal:\s*input\.signal\s*\},?\s*\)/,
+  );
+  assert.match(
+    editorSource,
+    /exportAbortRef\.current\?\.abort\(\);\s*exportAbortRef\.current = null;\s*loadAbortRef\.current\?\.abort\(\);/,
+  );
+  assert.match(
     privateRewriteCss,
     /@media \(max-width: 760px\)[\s\S]*?min-height:\s*44px;/,
   );

@@ -87,6 +87,19 @@ and this project follows
   could multiply extraction memory without a runtime consumer.
 - Preserved non-uniform vector backgrounds during compatible native text
   replacement instead of painting an opaque cleanup rectangle.
+- Forced pages with custom, embedded, remapped, or otherwise unverified text
+  fonts through the secure raster path so an invisible searchable copy cannot
+  survive a vector replacement. A bounded page-wide semantic check also
+  rejects copies split across multiple standard-font text-show operators.
+- Restricted vector neutralization to directly decoded printable-ASCII `Tj`
+  strings with a locally verified `Tf` font selection. Non-canonical WinAnsi
+  bytes, positioned `TJ` arrays, quote operators, `ExtGState` font changes,
+  missing font state, and multi-operation text blocks now fail closed to
+  raster so PDF.js whitespace or character normalization cannot preserve a
+  hidden copy.
+- Propagated export cancellation into PDF.js fallback loading and invalidated
+  stale export ownership before opening another PDF, preventing a cancelled
+  export from restoring the previous document's ready state.
 
 ### Removed
 

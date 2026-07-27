@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { URL } from "node:url";
 
+import fontkit from "@pdf-lib/fontkit";
 import { build } from "esbuild";
 import {
   PDFArray,
@@ -80,7 +82,13 @@ function replacementElement(originalText, text = "Replacement text") {
   };
 }
 
-async function sourcePdf(textRuns, { targetAsTj = false } = {}) {
+async function sourcePdf(
+  textRuns,
+  {
+    removeLocalFontSelection = false,
+    targetAsAdjustedTj = false,
+  } = {},
+) {
   const document = await PDFDocument.create({
     updateMetadata: false,
   });
@@ -94,7 +102,7 @@ async function sourcePdf(textRuns, { targetAsTj = false } = {}) {
       font,
     });
   }
-  if (targetAsTj) {
+  if (targetAsAdjustedTj || removeLocalFontSelection) {
     const contents = page.node.Contents();
     assert.ok(contents instanceof PDFArray);
     const stream = contents.lookup(0, PDFStream);
@@ -102,20 +110,34 @@ async function sourcePdf(textRuns, { targetAsTj = false } = {}) {
     const source = new TextDecoder().decode(
       stream.getUnencodedContents(),
     );
-    const target = Buffer.from("Original secret")
-      .toString("hex")
-      .toUpperCase();
-    const first = Buffer.from("Original ")
-      .toString("hex")
-      .toUpperCase();
-    const second = Buffer.from("secret")
-      .toString("hex")
-      .toUpperCase();
-    const rewritten = source.replace(
-      `<${target}> Tj`,
-      `[<${first}> 0 <${second}>] TJ`,
+    let rewritten = source;
+    if (targetAsAdjustedTj) {
+      const target = Buffer.from("Original secret")
+        .toString("hex")
+        .toUpperCase();
+      const first = Buffer.from("Original")
+        .toString("hex")
+        .toUpperCase();
+      const second = Buffer.from("secret")
+        .toString("hex")
+        .toUpperCase();
+      rewritten = rewritten.replace(
+        `<${target}> Tj`,
+        `[<${first}> -200 <${second}>] TJ`,
+      );
+    } else {
+      rewritten = rewritten.replace(
+        /\/[^\s]+ 14 Tf/,
+        "",
+      );
+    }
+    assert.notEqual(
+      rewritten,
+      source,
+      targetAsAdjustedTj
+        ? "fixture rewrites Tj as a positioned TJ array"
+        : "fixture removes the local Tf selection",
     );
-    assert.notEqual(rewritten, source, "fixture rewrites Tj as hex TJ");
     const reference = document.context.register(
       document.context.flateStream(rewritten),
     );
@@ -169,7 +191,7 @@ test("existing-text export preserves unedited vectors and removes the old search
   const original = await sourcePdf([
     { text: "Keep searchable", x: 30, y: 150 },
     { text: "Original secret", x: 30, y: 100 },
-  ], { targetAsTj: true });
+  ]);
   const result = await editorExport.exportEditedPdf({
     sourceBytes: original,
     pages: [pageModel],
@@ -333,6 +355,77 @@ test("ambiguous source text takes the explicit browser raster fallback", async (
   );
 });
 
+test("positioned TJ arrays take the secure raster fallback", async () => {
+  const sourceBytes = await sourcePdf(
+    [{ text: "Original secret", x: 30, y: 100 }],
+    { targetAsAdjustedTj: true },
+  );
+  assert.deepEqual(
+    (await extractedTextItems(sourceBytes)).map((item) => item.str),
+    ["Original secret"],
+    "PDF.js synthesizes the semantic space from the TJ adjustment",
+  );
+
+  await assert.rejects(
+    editorExport.exportEditedPdf({
+      sourceBytes,
+      pages: [pageModel],
+      elements: [replacementElement("Original secret")],
+      filename: "positioned-tj.pdf",
+    }),
+    /PDF previews can only be loaded in the browser/i,
+  );
+});
+
+test("text without a local verified Tf takes the secure raster fallback", async () => {
+  const sourceBytes = await sourcePdf(
+    [{ text: "Original secret", x: 30, y: 100 }],
+    { removeLocalFontSelection: true },
+  );
+
+  await assert.rejects(
+    editorExport.exportEditedPdf({
+      sourceBytes,
+      pages: [pageModel],
+      elements: [replacementElement("Original secret")],
+      filename: "missing-local-font.pdf",
+    }),
+    /PDF previews can only be loaded in the browser/i,
+  );
+});
+
+test("ExtGState text takes the secure raster fallback", async () => {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  const page = document.addPage([300, 200]);
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  page.drawText("Original secret", {
+    x: 30,
+    y: 100,
+    size: 14,
+    font,
+    opacity: 0.5,
+  });
+  const sourceBytes = await document.save({
+    useObjectStreams: true,
+  });
+  assert.deepEqual(
+    (await extractedTextItems(sourceBytes)).map((item) => item.str),
+    ["Original secret"],
+  );
+
+  await assert.rejects(
+    editorExport.exportEditedPdf({
+      sourceBytes,
+      pages: [pageModel],
+      elements: [replacementElement("Original secret")],
+      filename: "ext-gstate-text.pdf",
+    }),
+    /PDF previews can only be loaded in the browser/i,
+  );
+});
+
 test("font encodings that cannot be identified exactly take the raster fallback", async () => {
   const document = await PDFDocument.create({
     updateMetadata: false,
@@ -360,6 +453,249 @@ test("font encodings that cannot be identified exactly take the raster fallback"
       pages: [pageModel],
       elements: [replacementElement("Ω", "Omega")],
       filename: "encoded.pdf",
+    }),
+    /PDF previews can only be loaded in the browser/i,
+  );
+});
+
+test("non-printable WinAnsi bytes take the secure raster fallback", async () => {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  const page = document.addPage([300, 200]);
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  page.drawText("Original secret", {
+    x: 30,
+    y: 100,
+    size: 14,
+    font,
+  });
+  page.drawText("Original secret", {
+    x: 30,
+    y: 100,
+    size: 14,
+    font,
+    opacity: 0,
+  });
+
+  const contents = page.node.Contents();
+  assert.ok(contents instanceof PDFArray);
+  const stream = contents.lookup(0, PDFStream);
+  assert.ok(stream instanceof PDFContentStream);
+  const source = new TextDecoder().decode(
+    stream.getUnencodedContents(),
+  );
+  const target = Buffer.from("Original secret")
+    .toString("hex")
+    .toUpperCase();
+  const nonCanonical = Buffer.from("Original")
+    .toString("hex")
+    .toUpperCase()
+    .concat(
+      "00",
+      Buffer.from(" secret").toString("hex").toUpperCase(),
+    );
+  const needle = `<${target}> Tj`;
+  const duplicateIndex = source.lastIndexOf(needle);
+  assert.ok(
+    duplicateIndex >= 0,
+    "fixture contains the invisible duplicate",
+  );
+  const rewritten = [
+    source.slice(0, duplicateIndex),
+    `<${nonCanonical}> Tj`,
+    source.slice(duplicateIndex + needle.length),
+  ].join("");
+  const reference = document.context.register(
+    document.context.flateStream(rewritten),
+  );
+  page.node.set(
+    PDFName.of("Contents"),
+    document.context.obj([reference]),
+  );
+
+  const sourceBytes = await document.save({
+    useObjectStreams: true,
+  });
+  assert.deepEqual(
+    (await extractedTextItems(sourceBytes)).map((item) => item.str),
+    ["Original secret", "Original secret"],
+    "PDF.js suppresses the non-printable byte in searchable text",
+  );
+
+  await assert.rejects(
+    editorExport.exportEditedPdf({
+      sourceBytes,
+      pages: [pageModel],
+      elements: [replacementElement("Original secret")],
+      filename: "non-printable-winansi.pdf",
+    }),
+    /PDF previews can only be loaded in the browser/i,
+  );
+});
+
+test("an invisible custom-font copy forces the secure raster fallback", async () => {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  document.registerFontkit(fontkit);
+  const page = document.addPage([300, 200]);
+  const standard = await document.embedFont(StandardFonts.Helvetica);
+  const custom = await document.embedFont(
+    await readFile(
+      new URL(
+        "../public/private-rewrite/fonts/NotoSans-Regular.ttf",
+        import.meta.url,
+      ),
+    ),
+    { subset: true },
+  );
+  page.drawText("Original secret", {
+    x: 30,
+    y: 100,
+    size: 14,
+    font: standard,
+  });
+  page.drawText("Original secret", {
+    x: 30,
+    y: 100,
+    size: 14,
+    font: custom,
+    opacity: 0,
+  });
+  const sourceBytes = await document.save({
+    useObjectStreams: true,
+  });
+  assert.deepEqual(
+    (await extractedTextItems(sourceBytes)).map((item) => item.str),
+    ["Original secret", "Original secret"],
+    "the fixture contains a searchable invisible duplicate",
+  );
+
+  await assert.rejects(
+    editorExport.exportEditedPdf({
+      sourceBytes,
+      pages: [pageModel],
+      elements: [replacementElement("Original secret")],
+      filename: "hidden-custom-font-copy.pdf",
+    }),
+    /PDF previews can only be loaded in the browser/i,
+  );
+});
+
+test("a split invisible WinAnsi copy forces the secure raster fallback", async () => {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  const page = document.addPage([300, 200]);
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  const fontSize = 14;
+  const firstPart = "Original";
+  page.drawText("Original secret", {
+    x: 30,
+    y: 100,
+    size: fontSize,
+    font,
+  });
+  page.drawText(firstPart, {
+    x: 30,
+    y: 100,
+    size: fontSize,
+    font,
+    opacity: 0,
+  });
+  page.drawText("secret", {
+    x:
+      32 +
+      font.widthOfTextAtSize(firstPart, fontSize),
+    y: 100,
+    size: fontSize,
+    font,
+    opacity: 0,
+  });
+  const sourceBytes = await document.save({
+    useObjectStreams: true,
+  });
+  assert.deepEqual(
+    (await extractedTextItems(sourceBytes)).map((item) => item.str),
+    ["Original secret", "Original secret"],
+    "PDF.js combines the split invisible operators semantically",
+  );
+
+  await assert.rejects(
+    editorExport.exportEditedPdf({
+      sourceBytes,
+      pages: [pageModel],
+      elements: [replacementElement("Original secret")],
+      filename: "split-hidden-copy.pdf",
+    }),
+    /PDF previews can only be loaded in the browser/i,
+  );
+});
+
+test("a hidden Tj split across content streams forces the secure raster fallback", async () => {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  const page = document.addPage([300, 200]);
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  page.drawText("Original secret", {
+    x: 30,
+    y: 100,
+    size: 14,
+    font,
+  });
+  page.drawText("Original secret", {
+    x: 30,
+    y: 100,
+    size: 14,
+    font,
+    opacity: 0,
+  });
+
+  const contents = page.node.Contents();
+  assert.ok(contents instanceof PDFArray);
+  const stream = contents.lookup(0, PDFStream);
+  assert.ok(stream instanceof PDFContentStream);
+  const source = new TextDecoder().decode(
+    stream.getUnencodedContents(),
+  );
+  const target = Buffer.from("Original secret")
+    .toString("hex")
+    .toUpperCase();
+  const needle = `<${target}> Tj`;
+  const duplicateIndex = source.lastIndexOf(needle);
+  assert.ok(
+    duplicateIndex >= 0,
+    "fixture contains the invisible duplicate",
+  );
+  const boundary = duplicateIndex + needle.length - 1;
+  const first = document.context.register(
+    document.context.flateStream(source.slice(0, boundary)),
+  );
+  const second = document.context.register(
+    document.context.flateStream(source.slice(boundary)),
+  );
+  page.node.set(
+    PDFName.of("Contents"),
+    document.context.obj([first, second]),
+  );
+
+  const sourceBytes = await document.save({
+    useObjectStreams: true,
+  });
+  assert.deepEqual(
+    (await extractedTextItems(sourceBytes)).map((item) => item.str),
+    ["Original secret", "Original secret"],
+    "PDF.js reads the Tj operator across the stream boundary",
+  );
+
+  await assert.rejects(
+    editorExport.exportEditedPdf({
+      sourceBytes,
+      pages: [pageModel],
+      elements: [replacementElement("Original secret")],
+      filename: "split-stream-hidden-copy.pdf",
     }),
     /PDF previews can only be loaded in the browser/i,
   );
