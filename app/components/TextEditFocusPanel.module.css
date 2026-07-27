@@ -1,0 +1,220 @@
+.backdrop {
+  position: absolute;
+  z-index: 80;
+  border: 0;
+  background: rgba(13, 22, 18, 0.48);
+  cursor: pointer;
+  inset: 0;
+  backdrop-filter: blur(2px);
+}
+
+.panel {
+  position: absolute;
+  z-index: 81;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  max-height: min(78dvh, 680px);
+  gap: 16px;
+  overflow-y: auto;
+  border: 1px solid #cad5ce;
+  border-bottom: 0;
+  border-radius: 24px 24px 0 0;
+  background: #fffefa;
+  padding:
+    10px
+    max(18px, env(safe-area-inset-right))
+    max(18px, calc(env(safe-area-inset-bottom) + 10px))
+    max(18px, env(safe-area-inset-left));
+  box-shadow: 0 -22px 70px rgba(13, 22, 18, 0.25);
+  color: #17221e;
+  outline: 0;
+  overscroll-behavior: contain;
+}
+
+.handle {
+  width: 42px;
+  height: 4px;
+  border-radius: 999px;
+  background: #b9c5bd;
+  justify-self: center;
+}
+
+.header {
+  display: grid;
+  align-items: start;
+  gap: 12px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.header h2,
+.header p,
+.original p {
+  margin: 0;
+}
+
+.header h2 {
+  font-size: clamp(1.2rem, 4.8vw, 1.5rem);
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+}
+
+.header p {
+  margin-top: 5px;
+  color: #59665f;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #a9d5bf;
+  border-radius: 12px;
+  background: #e9f7ef;
+  color: #087652;
+  place-items: center;
+}
+
+.closeButton {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  border: 1px solid #d5ddd8;
+  border-radius: 12px;
+  background: #f7f8f4;
+  color: #17221e;
+  cursor: pointer;
+  place-items: center;
+}
+
+.original {
+  min-width: 0;
+  border: 1px solid #d9e0db;
+  border-radius: 14px;
+  background: #f4f6f2;
+  padding: 10px 12px;
+}
+
+.original > span,
+.field > span {
+  display: block;
+  margin-bottom: 6px;
+  color: #526159;
+  font-size: 0.7rem;
+  font-weight: 760;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.original p {
+  overflow: hidden;
+  color: #3a4740;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.field textarea {
+  width: 100%;
+  min-height: 148px;
+  border: 1px solid #9eb3a7;
+  border-radius: 16px;
+  background: #fff;
+  padding: 13px 14px;
+  color: #17221e;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1.45;
+  outline: 0;
+  resize: vertical;
+}
+
+.field textarea:focus {
+  border-color: #087652;
+  box-shadow: 0 0 0 3px rgba(8, 118, 82, 0.16);
+}
+
+.errorMessage {
+  margin: 0;
+  border: 1px solid #e4bdb9;
+  border-radius: 12px;
+  background: #fff3f1;
+  padding: 10px 12px;
+  color: #8d2e27;
+  font-size: 0.78rem;
+  font-weight: 680;
+  line-height: 1.45;
+}
+
+.actions {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
+}
+
+.actions button {
+  min-height: 48px;
+  border-radius: 14px;
+  padding: 10px 16px;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.cancelButton {
+  border: 1px solid #cbd5cf;
+  background: #fff;
+  color: #26342d;
+}
+
+.applyButton {
+  border: 1px solid #096c4d;
+  background: #087652;
+  box-shadow: 0 4px 0 #075c40;
+  color: #fffefa;
+}
+
+.closeButton:focus-visible,
+.cancelButton:focus-visible,
+.applyButton:focus-visible {
+  outline: 3px solid rgba(45, 111, 232, 0.38);
+  outline-offset: 2px;
+}
+
+@media (max-height: 520px) and (orientation: landscape) {
+  .panel {
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: auto;
+    width: min(520px, 78vw);
+    max-height: none;
+    gap: 10px;
+    border: 0;
+    border-left: 1px solid #cad5ce;
+    border-radius: 0;
+    padding-top: max(14px, env(safe-area-inset-top));
+  }
+
+  .handle {
+    display: none;
+  }
+
+  .field textarea {
+    height: 104px;
+    min-height: 104px;
+    resize: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel,
+  .backdrop {
+    animation: none;
+  }
+}

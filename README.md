@@ -48,7 +48,8 @@ cases intentionally use a safe flattened fallback; see
   Japanese, pure Arabic, pure Hebrew, and a reviewed symbol set; supported
   faces are subsetted except the explicitly tested Symbols 2 fallback.
 - **Document-first editor:** a full-viewport workspace with fit-page zoom,
-  collapsible desktop panels, mobile sheets, and native touch pan and pinch.
+  collapsible desktop panels, native touch pan and pinch, and a focused mobile
+  text-replacement sheet that commits only after confirmation.
 - **Self-contained:** PDF.js worker, CMaps, fonts, and WebAssembly helpers are
   served from the same application instead of a third-party CDN.
 - **Security bounded:** file sizes, pages, rendering, text, images, ZIP output,
@@ -237,10 +238,9 @@ The detailed implementation review is retained in
   encodings, nested form content, annotations, or unsupported streams use a
   fail-closed raster fallback. Vector preservation also requires complete
   matching PDF.js text-layer evidence, no unselected text fragment overlapping
-  an edited source rectangle, and no retained alias to the old content streams
-  through the copied page graph. If any proof is missing, the page is
-  rasterized and can lose selection, accessibility structure, and vector
-  fidelity.
+  an edited source rectangle, and no copied page key or inherited resource that
+  aliases an old content stream. If any proof is missing, the page is rasterized
+  and can lose selection, accessibility structure, and vector fidelity.
 - OCR-backed replacements always use that secure raster path on the affected
   source page after removing the old pixels; unrelated source text on that
   page is no longer independently selectable.

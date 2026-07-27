@@ -15,6 +15,7 @@ import {
   Italic,
   LoaderCircle,
   Maximize2,
+  Move,
   MousePointer2,
   PanelLeft,
   PenLine,
@@ -74,6 +75,10 @@ import {
   type TextEditorElement,
 } from "../lib/pdf-editor-types";
 import {
+  applyFocusedTextReplacement,
+  type FocusedTextEditIntent,
+} from "../lib/pdf-editor-text-replacement";
+import {
   computeEditorFitZoom,
   type EditorFitMode,
 } from "../lib/pdf-editor-viewport";
@@ -114,6 +119,7 @@ import PdfPageCanvas from "./PdfPageCanvas";
 import PrivateRewriteControls, {
   type PrivateRewriteStatus,
 } from "./PrivateRewriteControls";
+import TextEditFocusPanel from "./TextEditFocusPanel";
 import styles from "./PdfEditorWorkspace.module.css";
 
 type EditorPhase = "idle" | "loading" | "ready" | "exporting";
@@ -187,6 +193,25 @@ type SampledTextColors = {
   background: string;
   foreground: string;
 };
+
+type FocusedTextEdit = {
+  element: TextEditorElement;
+  intent: FocusedTextEditIntent;
+};
+
+type TouchTextTarget =
+  | {
+      kind: "element";
+      elementId: string;
+      pointerId: number;
+      trigger: HTMLElement;
+    }
+  | {
+      kind: "fragment";
+      fragment: ExtractedPdfTextFragment;
+      pointerId: number;
+      trigger: HTMLElement;
+    };
 
 const HISTORY_LIMIT = 60;
 const DEFAULT_PAGE_WIDTH = 595.28;
@@ -766,6 +791,11 @@ export default function PdfEditorWorkspace({
   const editorHeadingRef = useRef<HTMLHeadingElement>(null);
   const pagesPanelRef = useRef<HTMLElement>(null);
   const propertiesPanelRef = useRef<HTMLElement>(null);
+  const focusedTextEditorRef = useRef<HTMLElement>(null);
+  const focusedTextInputRef = useRef<HTMLTextAreaElement>(null);
+  const focusedTextTriggerRef = useRef<HTMLElement | null>(null);
+  const touchTextTargetRef = useRef<TouchTextTarget | null>(null);
+  const suppressTextTargetClickRef = useRef(false);
   const pagesToggleRef = useRef<HTMLButtonElement>(null);
   const propertiesToggleRef = useRef<HTMLButtonElement>(null);
   const exportButtonRef = useRef<HTMLButtonElement>(null);
@@ -792,8 +822,10 @@ export default function PdfEditorWorkspace({
     snapshot: EditorSnapshot;
   } | null>(null);
   const keyboardActionsRef = useRef<{
+    cancelFocusedTextEditing: () => void;
     deleteSelected: () => void;
     editingTextId: string | null;
+    focusedTextEditing: boolean;
     finishInspectorEditing: () => void;
     finishTextEditing: () => void;
     redo: () => void;
@@ -839,6 +871,9 @@ export default function PdfEditorWorkspace({
     null,
   );
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
+  const [focusedTextEdit, setFocusedTextEdit] =
+    useState<FocusedTextEdit | null>(null);
+  const [focusedTextEditError, setFocusedTextEditError] = useState("");
   const [textLayerState, setTextLayerState] = useState<TextLayerState>({
     key: "",
     status: "idle",
@@ -1128,6 +1163,7 @@ export default function PdfEditorWorkspace({
     if (
       phase !== "ready" ||
       !activePage ||
+      focusedTextEdit !== null ||
       fitMode === "custom"
     ) {
       return;
@@ -1174,6 +1210,7 @@ export default function PdfEditorWorkspace({
   }, [
     activePage,
     fitMode,
+    focusedTextEdit,
     phase,
   ]);
 
@@ -1649,6 +1686,131 @@ export default function PdfEditorWorkspace({
     setSelectedId(elementId);
   }
 
+  function closeFocusedTextEditor(restoreFocus: boolean) {
+    const trigger = focusedTextTriggerRef.current;
+    focusedTextTriggerRef.current = null;
+    setFocusedTextEditError("");
+    setFocusedTextEdit(null);
+    if (!restoreFocus) return;
+    window.requestAnimationFrame(() => {
+      const focusTarget =
+        trigger?.isConnected === true ? trigger : editorHeadingRef.current;
+      focusTarget?.focus({ preventScroll: true });
+    });
+  }
+
+  function cancelFocusedTextEditing() {
+    closeFocusedTextEditor(true);
+  }
+
+  function openFocusedTextEditor(
+    element: TextEditorElement,
+    intent: FocusedTextEdit["intent"],
+    trigger?: HTMLElement | null,
+  ) {
+    finishInspectorEditing();
+    finishTextEditing();
+    setOpenPanel(null);
+    setFitMode("custom");
+    setError("");
+    setFocusedTextEditError("");
+    focusedTextTriggerRef.current =
+      trigger ?? (document.activeElement as HTMLElement | null);
+    setFocusedTextEdit({
+      element: {
+        ...element,
+        sourceText: element.sourceText
+          ? { ...element.sourceText }
+          : undefined,
+      },
+      intent,
+    });
+  }
+
+  function applyFocusedTextEditing() {
+    const edit = focusedTextEdit;
+    if (!edit) return;
+    const trigger = focusedTextTriggerRef.current;
+    const draftedElement: TextEditorElement = {
+      ...edit.element,
+      direction: inferTextDirection(edit.element.text),
+    };
+    let appliedElementId = draftedElement.id;
+    let outcome: "applied" | "missing" | "unchanged" =
+      "missing";
+    const before = snapshotRef.current;
+    const next = commit((current) => {
+      const result = applyFocusedTextReplacement(
+        current,
+        draftedElement,
+        edit.intent,
+      );
+      appliedElementId = result.elementId;
+      outcome = result.outcome;
+      return result.snapshot;
+    });
+    if (outcome === "missing") {
+      const message =
+        "This text replacement is no longer available. Cancel and select the source text again.";
+      setError(message);
+      setFocusedTextEditError(message);
+      return;
+    }
+    if (outcome === "applied" && next === before) {
+      /*
+       * commit reports the active document limit. Keep the transactional
+       * editor open so the user can shorten the draft instead of losing it.
+       */
+      const candidateIssue =
+        getPageCountLimitIssue(next.pages.length) ??
+        getEditorSnapshotLimitIssue(
+          applyFocusedTextReplacement(
+            before,
+            draftedElement,
+            edit.intent,
+          ).snapshot.elements,
+        );
+      const message = candidateIssue
+        ? describePdfSecurityLimitIssue(candidateIssue)
+        : "This replacement could not be applied. Shorten the new text and try again.";
+      setFocusedTextEditError(message);
+      window.requestAnimationFrame(() => {
+        focusedTextInputRef.current?.focus({ preventScroll: true });
+      });
+      return;
+    }
+    setSelectedId(appliedElementId);
+    setTool("select");
+    if (outcome === "applied") {
+      setError("");
+      setProgress({
+        value: 100,
+        label:
+          draftedElement.text.length === 0
+            ? "Existing text removed locally"
+            : "Existing text replaced locally",
+      });
+    }
+    closeFocusedTextEditor(false);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const resultElement = [
+          ...(surfaceRef.current?.querySelectorAll<HTMLElement>(
+            "[data-editor-element-id]",
+          ) ?? []),
+        ].find(
+          (element) =>
+            element.dataset.editorElementId === appliedElementId,
+        );
+        const focusTarget =
+          trigger?.isConnected === true
+            ? trigger
+            : resultElement ?? editorHeadingRef.current;
+        focusTarget?.focus({ preventScroll: true });
+      });
+    });
+  }
+
   function undo() {
     textEditOriginRef.current = null;
     inspectorEditOriginRef.current = null;
@@ -1695,8 +1857,10 @@ export default function PdfEditorWorkspace({
 
   useEffect(() => {
     keyboardActionsRef.current = {
+      cancelFocusedTextEditing,
       deleteSelected,
       editingTextId,
+      focusedTextEditing: focusedTextEdit !== null,
       finishInspectorEditing,
       finishTextEditing,
       redo,
@@ -1709,6 +1873,13 @@ export default function PdfEditorWorkspace({
     const onKeyDown = (event: KeyboardEvent) => {
       const actions = keyboardActionsRef.current;
       if (!actions) return;
+      if (actions.focusedTextEditing) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          actions.cancelFocusedTextEditing();
+        }
+        return;
+      }
       const command = event.metaKey || event.ctrlKey;
       if (
         command &&
@@ -2260,7 +2431,11 @@ export default function PdfEditorWorkspace({
     if (element.type === "image") setPendingImage(null);
   }
 
-  function beginExistingTextEdit(fragment: ExtractedPdfTextFragment) {
+  function beginExistingTextEdit(
+    fragment: ExtractedPdfTextFragment,
+    trigger?: HTMLElement | null,
+    preferFocusedEditor = false,
+  ) {
     if (!activePage || activePage.sourcePageIndex === null) return;
     const display = pageDisplaySize(activePage);
     const geometry = textFragmentGeometry(fragment, display);
@@ -2313,6 +2488,11 @@ export default function PdfEditorWorkspace({
               kind: "native",
             },
     };
+
+    if (compactLayout || preferFocusedEditor) {
+      openFocusedTextEditor(element, "create", trigger);
+      return;
+    }
 
     const before = snapshotRef.current;
     const next = commit((current) => ({
@@ -2485,8 +2665,38 @@ export default function PdfEditorWorkspace({
     element: EditorElement,
     kind: "move" | "resize",
   ) {
-    if (tool !== "select" || event.button !== 0) return;
+    if (event.button !== 0) return;
     if (editingTextId === element.id) return;
+    if (
+      tool === "edit-text" &&
+      kind === "move" &&
+      element.type === "text" &&
+      element.sourceText
+    ) {
+      if (event.pointerType === "touch") {
+        touchTextTargetRef.current = {
+          kind: "element",
+          elementId: element.id,
+          pointerId: event.pointerId,
+          trigger: event.currentTarget,
+        };
+      }
+      return;
+    }
+    if (tool !== "select") return;
+    if (
+      event.pointerType === "touch" &&
+      kind === "move" &&
+      event.currentTarget.dataset.touchMoveHandle !== "true"
+    ) {
+      touchTextTargetRef.current = {
+        kind: "element",
+        elementId: element.id,
+        pointerId: event.pointerId,
+        trigger: event.currentTarget,
+      };
+      return;
+    }
     finishInspectorEditing();
     finishTextEditing();
     stopEvent(event);
@@ -2502,6 +2712,29 @@ export default function PdfEditorWorkspace({
       snapshot: snapshotRef.current,
     };
     capturePointer(event.pointerId);
+  }
+
+  function activateEditorElement(
+    element: EditorElement,
+    trigger: HTMLElement,
+    preferFocusedEditor = false,
+  ) {
+    const canUseFocusedEditor =
+      element.type === "text" &&
+      Boolean(element.sourceText) &&
+      (compactLayout || preferFocusedEditor);
+    if (
+      canUseFocusedEditor &&
+      (selectedId === element.id || tool === "edit-text")
+    ) {
+      openFocusedTextEditor(
+        element as TextEditorElement,
+        "update",
+        trigger,
+      );
+      return;
+    }
+    setSelectedId(element.id);
   }
 
   function onSurfacePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
@@ -2678,6 +2911,11 @@ export default function PdfEditorWorkspace({
     if (canvasTouchPointsRef.current.has(event.pointerId)) {
       event.preventDefault();
       const gesture = canvasTouchGestureRef.current;
+      const touchTarget =
+        touchTextTargetRef.current?.pointerId === event.pointerId
+          ? touchTextTargetRef.current
+          : null;
+      if (touchTarget) touchTextTargetRef.current = null;
       canvasTouchPointsRef.current.delete(event.pointerId);
       try {
         event.currentTarget.releasePointerCapture(event.pointerId);
@@ -2700,6 +2938,38 @@ export default function PdfEditorWorkspace({
         };
       } else {
         canvasTouchGestureRef.current = null;
+      }
+
+      if (
+        event.type === "pointerup" &&
+        remaining.length === 0 &&
+        gesture?.kind === "pan" &&
+        !gesture.moved &&
+        touchTarget
+      ) {
+        suppressTextTargetClickRef.current = true;
+        window.setTimeout(() => {
+          suppressTextTargetClickRef.current = false;
+        }, 0);
+        if (touchTarget.kind === "fragment") {
+          beginExistingTextEdit(
+            touchTarget.fragment,
+            touchTarget.trigger,
+            true,
+          );
+        } else {
+          const element = snapshotRef.current.elements.find(
+            (candidate) => candidate.id === touchTarget.elementId,
+          );
+          if (element) {
+            activateEditorElement(
+              element,
+              touchTarget.trigger,
+              true,
+            );
+          }
+        }
+        return;
       }
 
       if (
@@ -2923,10 +3193,10 @@ export default function PdfEditorWorkspace({
               fragments: textPage.fragments
                 .filter((fragment) => fragment.origin === "native")
                 .map((fragment) => ({
-                  id: fragment.id,
-                  text: fragment.text,
-                  ...textFragmentGeometry(fragment, display),
-                  hasGeometry: fragment.hasGeometry,
+                    id: fragment.id,
+                    text: fragment.text,
+                    ...textFragmentGeometry(fragment, display),
+                    hasGeometry: fragment.hasGeometry,
                 })),
             },
           ];
@@ -2991,9 +3261,19 @@ export default function PdfEditorWorkspace({
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
-          beginExistingTextEdit(fragment);
+          if (suppressTextTargetClickRef.current) return;
+          beginExistingTextEdit(fragment, event.currentTarget);
         }}
         onPointerDown={(event) => {
+          if (event.pointerType === "touch") {
+            touchTextTargetRef.current = {
+              kind: "fragment",
+              fragment,
+              pointerId: event.pointerId,
+              trigger: event.currentTarget,
+            };
+            return;
+          }
           event.preventDefault();
           event.stopPropagation();
         }}
@@ -3012,6 +3292,30 @@ export default function PdfEditorWorkspace({
     );
   }
 
+  function renderSourceTextPreviewMask(element: EditorElement) {
+    if (element.type !== "text" || !element.sourceText) return null;
+    const sourceText = element.sourceText;
+    const repairColor =
+      element.backgroundColor ?? sourceText.originalBackgroundColor;
+    return (
+      <div
+        aria-hidden="true"
+        className={styles.sourceTextPreviewMask}
+        data-source-text-mask={sourceText.id}
+        key={`source-mask-${element.id}`}
+        style={{
+          backgroundColor: repairColor,
+          boxShadow: `0 0 0 1px ${repairColor}`,
+          left: `${sourceText.originalX * 100}%`,
+          top: `${sourceText.originalY * 100}%`,
+          width: `${sourceText.originalWidth * 100}%`,
+          height: `${sourceText.originalHeight * 100}%`,
+          transform: `rotate(${sourceText.originalRotation ?? 0}deg)`,
+        }}
+      />
+    );
+  }
+
   function renderElement(element: EditorElement) {
     if (!activePage) return null;
     const display = pageDisplaySize(activePage);
@@ -3025,12 +3329,36 @@ export default function PdfEditorWorkspace({
       opacity: element.opacity,
       transform: `rotate(${element.rotation ?? 0}deg)`,
     };
+    const renderedPageWidth = Math.max(1, 720 * zoom);
+    const renderedPageHeight = Math.max(
+      1,
+      renderedPageWidth * (display.height / display.width),
+    );
+    const horizontalHandleEdge = Math.min(
+      0.5,
+      44 / renderedPageWidth,
+    );
+    const verticalHandleEdge = Math.min(
+      0.5,
+      44 / renderedPageHeight,
+    );
+    const elementRight = element.x + element.width;
+    const moveHandleHorizontalEdge =
+      elementRight >= 1 - horizontalHandleEdge
+        ? "right"
+        : elementRight <= horizontalHandleEdge
+          ? "left"
+          : "none";
+    const moveHandleVerticalEdge =
+      element.y <= verticalHandleEdge ? "top" : "none";
 
     let content;
     if (element.type === "text") {
       const textStyle: CSSProperties = {
         color: element.color,
-        background: element.backgroundColor || "transparent",
+        background: element.sourceText
+          ? "transparent"
+          : element.backgroundColor || "transparent",
         direction: element.direction ?? "ltr",
         fontFamily: editorFontCss(element.fontFamily, element.text),
         fontSize: `${Math.max(7, element.fontSize * pixelScale)}px`,
@@ -3147,9 +3475,52 @@ export default function PdfEditorWorkspace({
           selected ? styles.selectedElement : ""
         }`}
         data-editor-element
+        data-editor-element-id={element.id}
         key={element.id}
-        onDoubleClick={() => {
-          if (element.type === "text") beginTextEditing(element.id);
+        onClick={(event) => {
+          if (
+            tool === "edit-text" &&
+            element.type === "text" &&
+            element.sourceText
+          ) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (suppressTextTargetClickRef.current) return;
+            openFocusedTextEditor(
+              element,
+              "update",
+              event.currentTarget,
+            );
+            return;
+          }
+          /*
+           * Pointer interactions are completed by finishInteraction. A
+           * zero-detail click is the activation path used by assistive
+           * technology, and handling only that path prevents a post-drag
+           * click from reopening the focused text editor.
+           */
+          if (
+            event.detail !== 0 ||
+            suppressTextTargetClickRef.current
+          ) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          activateEditorElement(element, event.currentTarget, true);
+        }}
+        onDoubleClick={(event) => {
+          if (
+            compactLayout &&
+            element.type === "text" &&
+            element.sourceText
+          ) {
+            openFocusedTextEditor(
+              element,
+              "update",
+              event.currentTarget,
+            );
+          } else if (element.type === "text") beginTextEditing(element.id);
           else setSelectedId(element.id);
         }}
         onPointerDown={(event) =>
@@ -3158,6 +3529,32 @@ export default function PdfEditorWorkspace({
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
+            if (
+              tool === "edit-text" &&
+              element.type === "text" &&
+              element.sourceText
+            ) {
+              event.stopPropagation();
+              openFocusedTextEditor(
+                element,
+                "update",
+                event.currentTarget,
+              );
+              return;
+            }
+            if (
+              event.key === "Enter" &&
+              compactLayout &&
+              element.type === "text" &&
+              element.sourceText
+            ) {
+              openFocusedTextEditor(
+                element,
+                "update",
+                event.currentTarget,
+              );
+              return;
+            }
             setSelectedId(element.id);
             return;
           }
@@ -3205,9 +3602,32 @@ export default function PdfEditorWorkspace({
         }}
         role="button"
         style={commonStyle}
-        tabIndex={tool === "select" ? 0 : -1}
+        tabIndex={
+          tool === "select" ||
+          (tool === "edit-text" &&
+            element.type === "text" &&
+            Boolean(element.sourceText))
+            ? 0
+            : -1
+        }
       >
         {content}
+        {selected &&
+        compactLayout &&
+        tool === "select" ? (
+          <span
+            aria-hidden="true"
+            className={styles.moveHandle}
+            data-edge-x={moveHandleHorizontalEdge}
+            data-edge-y={moveHandleVerticalEdge}
+            data-touch-move-handle="true"
+            onPointerDown={(event) =>
+              beginElementInteraction(event, element, "move")
+            }
+          >
+            <Move size={15} />
+          </span>
+        ) : null}
         {selected && tool === "select" ? (
           <span
             aria-hidden="true"
@@ -3451,7 +3871,11 @@ export default function PdfEditorWorkspace({
         type="file"
       />
 
-      <header className={styles.topbar}>
+      <header
+        aria-hidden={focusedTextEdit ? true : undefined}
+        className={styles.topbar}
+        inert={focusedTextEdit ? true : undefined}
+      >
         <div className={styles.topbarIdentity}>
           {immersive ? (
             <>
@@ -3596,13 +4020,17 @@ export default function PdfEditorWorkspace({
         </button>
       </header>
 
-      {error ? (
+      {error && !focusedTextEdit ? (
         <p className={styles.errorBanner} role="alert">
           {error}
         </p>
       ) : null}
 
-      <div className={styles.editorBody}>
+      <div
+        aria-hidden={focusedTextEdit ? true : undefined}
+        className={styles.editorBody}
+        inert={focusedTextEdit ? true : undefined}
+      >
         {compactLayout && openPanel ? (
           <button
             aria-label="Close workspace panel"
@@ -3937,6 +4365,7 @@ export default function PdfEditorWorkspace({
                   {tool === "edit-text"
                     ? activeTextFragments.map(renderExistingText)
                     : null}
+                  {activePageElements.map(renderSourceTextPreviewMask)}
                   {activePageElements.map(renderElement)}
                 </div>
               </div>
@@ -3952,7 +4381,9 @@ export default function PdfEditorWorkspace({
                         ? "No selectable text found. Run Private Rewrite to recognize scanned text without uploading the PDF."
                         : activeTextLayerStatus === "error"
                           ? "Native text detection failed. Private Rewrite can still recognize the rendered page locally."
-                          : "Click an outlined text block, then type directly on the page."
+                          : compactLayout
+                            ? "Tap an outlined text block to replace it in a focused editor."
+                            : "Click an outlined text block, then type directly on the page."
                   : tool === "select"
                     ? "Select an element to move, resize, or style it."
                     : tool === "draw" ||
@@ -4496,7 +4927,49 @@ export default function PdfEditorWorkspace({
         </aside>
       </div>
 
-      <footer aria-live="polite" className={styles.statusBar}>
+      {focusedTextEdit ? (
+        <TextEditFocusPanel
+          direction={focusedTextEdit.element.direction ?? "ltr"}
+          errorMessage={focusedTextEditError}
+          inputRef={focusedTextInputRef}
+          maxLength={
+            PDF_SECURITY_LIMITS.maxEditorTextCharactersPerElement
+          }
+          onApply={applyFocusedTextEditing}
+          onCancel={cancelFocusedTextEditing}
+          onChange={(text) => {
+            if (focusedTextEditError) {
+              setFocusedTextEditError("");
+              setError("");
+            }
+            setFocusedTextEdit((current) =>
+              current
+                ? {
+                    ...current,
+                    element: {
+                      ...current.element,
+                      direction: inferTextDirection(text),
+                      text,
+                    },
+                  }
+                : current,
+            );
+          }}
+          originalText={
+            focusedTextEdit.element.sourceText?.originalText ??
+            focusedTextEdit.element.text
+          }
+          panelRef={focusedTextEditorRef}
+          text={focusedTextEdit.element.text}
+        />
+      ) : null}
+
+      <footer
+        aria-hidden={focusedTextEdit ? true : undefined}
+        aria-live="polite"
+        className={styles.statusBar}
+        inert={focusedTextEdit ? true : undefined}
+      >
         <span>{progress.label}</span>
         <div
           aria-label={`Progress ${progress.value}%`}

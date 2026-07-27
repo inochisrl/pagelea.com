@@ -399,6 +399,62 @@ test("a containing word elsewhere does not force native raster fallback", async 
   assert.equal(xObjects?.entries().length ?? 0, 0);
 });
 
+test("a semantic source-text substring elsewhere forces the secure raster fallback", async () => {
+  const sourceBytes = await sourcePdf([
+    {
+      text: "Prefix Original secret suffix",
+      x: 30,
+      y: 150,
+    },
+    { text: "Original secret", x: 30, y: 100 },
+  ]);
+
+  await assert.rejects(
+    editorExport.exportEditedPdf({
+      sourceBytes,
+      pages: [pageModel],
+      elements: [replacementElement("Original secret")],
+      filename: "semantic-substring-copy.pdf",
+      nativeTextEvidence: nativeTextEvidence(
+        "Original secret",
+        [
+          {
+            text: "Prefix Original secret suffix",
+            x: 0.1,
+            y: 0.15,
+          },
+        ],
+      ),
+    }),
+    /PDF previews can only be loaded in the browser/i,
+  );
+});
+
+test("reordered whole fragments cannot hide a source-text copy", async () => {
+  const sourceBytes = await sourcePdf([
+    { text: "Original secret", x: 30, y: 100 },
+    { text: " secret", x: 30, y: 160 },
+    { text: "Original", x: 90, y: 160 },
+  ]);
+
+  await assert.rejects(
+    editorExport.exportEditedPdf({
+      sourceBytes,
+      pages: [pageModel],
+      elements: [replacementElement("Original secret")],
+      filename: "reordered-fragment-copy.pdf",
+      nativeTextEvidence: nativeTextEvidence(
+        "Original secret",
+        [
+          { text: " secret", x: 0.1, y: 0.12 },
+          { text: "Original", x: 0.45, y: 0.12 },
+        ],
+      ),
+    }),
+    /PDF previews can only be loaded in the browser/i,
+  );
+});
+
 test("native vector replacement does not paint over non-uniform backgrounds", async () => {
   const document = await PDFDocument.create({
     updateMetadata: false,

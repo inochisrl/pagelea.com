@@ -192,6 +192,10 @@ interface PdfContentParseBudget {
   tokens: number;
 }
 
+interface VectorDuplicateSearchBudget {
+  remainingWork: number;
+}
+
 const A4_WIDTH = 595.28;
 const A4_HEIGHT = 841.89;
 const MAX_VECTOR_TEXT_REWRITE_CONTENT_BYTES = 16 * 1024 * 1024;
@@ -205,6 +209,7 @@ const MAX_VECTOR_TEXT_REWRITE_SHOW_OPERATIONS = 25_000;
 const MAX_VECTOR_TEXT_REWRITE_OPERANDS = 4_096;
 const MAX_VECTOR_TEXT_REWRITE_SEARCH_WORK = 32 * 1024 * 1024;
 const MAX_VECTOR_TEXT_REWRITE_EVIDENCE_COMPARISONS = 5_000_000;
+const MAX_VECTOR_TEXT_REWRITE_DUPLICATE_SEARCH_WORK = 5_000_000;
 const NORMALIZED_GEOMETRY_EPSILON = 0.000_001;
 const SAFE_VECTOR_CONTENT_STREAM_KEYS = new Set([
   "Filter",
@@ -352,37 +357,106 @@ function asciiCaseFoldText(value: string): string {
   return result;
 }
 
+function asciiWordTokens(value: string): string[] {
+  return (
+    value.normalize("NFKC").match(/[A-Za-z0-9]+/g) ?? []
+  ).map(asciiCaseFoldText);
+}
+
+function containsEquivalentWordSequence(
+  target: string,
+  candidate: string,
+): boolean {
+  const targetTokens = asciiWordTokens(target);
+  if (targetTokens.length === 0) return false;
+  const candidateTokens = asciiWordTokens(candidate);
+  if (candidateTokens.length < targetTokens.length) return false;
+  const maximumStart =
+    candidateTokens.length - targetTokens.length;
+  for (let start = 0; start <= maximumStart; start += 1) {
+    let matches = true;
+    for (
+      let offset = 0;
+      offset < targetTokens.length;
+      offset += 1
+    ) {
+      if (
+        candidateTokens[start + offset] !==
+        targetTokens[offset]
+      ) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) return true;
+  }
+  return false;
+}
+
 function containsEquivalentTextSequence(
   target: string,
   texts: readonly string[],
+  budget: VectorDuplicateSearchBudget,
 ): boolean {
-  const foldedTarget = asciiCaseFoldText(target);
+  if (target.length > budget.remainingWork) {
+    budget.remainingWork = 0;
+    return true;
+  }
+  budget.remainingWork -= target.length;
+  const foldedTarget = asciiCaseFoldText(
+    normalizeVectorSearchText(target),
+  );
   if (!foldedTarget) return true;
 
-  const boundaries = new Set<number>([0]);
-  const foldedTexts: string[] = [];
-  let combinedLength = 0;
+  const foldedTexts = new Set<string>();
   for (const text of texts) {
-    const foldedText = asciiCaseFoldText(text);
+    if (text.length > budget.remainingWork) {
+      budget.remainingWork = 0;
+      return true;
+    }
+    budget.remainingWork -= text.length;
+    const foldedText = asciiCaseFoldText(
+      normalizeVectorSearchText(text),
+    );
     if (!foldedText) continue;
-    foldedTexts.push(foldedText);
-    combinedLength += foldedText.length;
-    boundaries.add(combinedLength);
-  }
-  if (combinedLength < foldedTarget.length) return false;
-
-  const combined = foldedTexts.join("");
-  let match = combined.indexOf(foldedTarget);
-  while (match !== -1) {
     if (
-      boundaries.has(match) &&
-      boundaries.has(match + foldedTarget.length)
+      foldedText === foldedTarget ||
+      (foldedText.includes(foldedTarget) &&
+        containsEquivalentWordSequence(target, text))
     ) {
       return true;
     }
-    match = combined.indexOf(foldedTarget, match + 1);
+    if (foldedText.length <= foldedTarget.length) {
+      foldedTexts.add(foldedText);
+    }
   }
-  return false;
+
+  /*
+   * A hidden copy can be split across operators, reordered, or separated by
+   * decoys. Determine whether whole normalized fragments can cover the target
+   * in any order. Reusing a fragment may conservatively force rasterization;
+   * it can never make an unsafe vector rewrite pass.
+   */
+  const reachable = new Uint8Array(foldedTarget.length + 1);
+  reachable[0] = 1;
+  for (
+    let start = 0;
+    start < foldedTarget.length;
+    start += 1
+  ) {
+    if (reachable[start] !== 1) continue;
+    for (const foldedText of foldedTexts) {
+      if (foldedText.length > budget.remainingWork) {
+        budget.remainingWork = 0;
+        return true;
+      }
+      budget.remainingWork -= foldedText.length;
+      if (foldedTarget.startsWith(foldedText, start)) {
+        reachable[start + foldedText.length] = 1;
+      }
+    }
+  }
+  return reachable[foldedTarget.length] === 1;
 }
 
 function skipPdfWhitespaceAndComments(
@@ -1298,6 +1372,7 @@ function evidenceSupportsVectorRewrite(
   evidence: NativeTextRewritePageEvidence | undefined,
   edits: readonly TextEditorElement[],
   normalizedOperations: readonly NormalizedPdfTextOperation[],
+  duplicateSearchBudget: VectorDuplicateSearchBudget,
 ): boolean {
   if (
     !evidence ||
@@ -1351,7 +1426,7 @@ function evidenceSupportsVectorRewrite(
 
   const selectedIds = new Set<string>();
   const sourceRects: NormalizedRectangle[] = [];
-  const normalizedTargets: string[] = [];
+  const targets: string[] = [];
   for (const edit of edits) {
     const source = edit.sourceText;
     if (
@@ -1382,9 +1457,7 @@ function evidenceSupportsVectorRewrite(
       return false;
     }
     selectedIds.add(source.id);
-    normalizedTargets.push(
-      normalizeVectorSearchText(source.originalText),
-    );
+    targets.push(source.originalText);
     sourceRects.push({
       x: source.originalX,
       y: source.originalY,
@@ -1397,13 +1470,14 @@ function evidenceSupportsVectorRewrite(
     (fragment) =>
       selectedIds.has(fragment.id)
         ? []
-        : [normalizeVectorSearchText(fragment.text)],
+        : [fragment.text],
   );
   if (
-    normalizedTargets.some((target) =>
+    targets.some((target) =>
       containsEquivalentTextSequence(
         target,
         unselectedEvidenceTexts,
+        duplicateSearchBudget,
       ),
     )
   ) {
@@ -1428,12 +1502,16 @@ function unselectedTextContainsEquivalentTarget(
   target: string,
   operations: readonly NormalizedPdfTextOperation[],
   selected: ReadonlySet<PdfTextShowOperation>,
+  duplicateSearchBudget: VectorDuplicateSearchBudget,
 ): boolean {
   return containsEquivalentTextSequence(
     target,
     operations.flatMap(({ operation, text }) =>
-      selected.has(operation) ? [] : [text],
+      selected.has(operation)
+        ? []
+        : [operation.text ?? text],
     ),
+    duplicateSearchBudget,
   );
 }
 
@@ -1505,8 +1583,12 @@ function rewrittenSourcePageContents(
   ) {
     return null;
   }
+  const duplicateSearchBudget: VectorDuplicateSearchBudget = {
+    remainingWork:
+      MAX_VECTOR_TEXT_REWRITE_DUPLICATE_SEARCH_WORK,
+  };
   const selected = new Set<PdfTextShowOperation>();
-  const normalizedOriginals: string[] = [];
+  const originalTexts: string[] = [];
   for (const edit of edits) {
     const originalText = edit.sourceText?.originalText;
     if (!originalText) return null;
@@ -1520,19 +1602,21 @@ function rewrittenSourcePageContents(
       return null;
     }
     selected.add(match.operation);
-    normalizedOriginals.push(normalizedOriginal);
+    originalTexts.push(originalText);
   }
   if (
     !evidenceSupportsVectorRewrite(
       evidence,
       edits,
       normalizedOperations,
+      duplicateSearchBudget,
     ) ||
-    normalizedOriginals.some((originalText) =>
+    originalTexts.some((originalText) =>
       unselectedTextContainsEquivalentTarget(
         originalText,
         normalizedOperations,
         selected,
+        duplicateSearchBudget,
       ),
     )
   ) {
@@ -1817,6 +1901,12 @@ function sourcePageContentIsExclusivelyOwned(
         break;
       }
       seenReferences.add(key);
+      if (
+        seenReferences.size >
+        PDF_SECURITY_LIMITS.maxPdfObjectGraphNodes
+      ) {
+        return false;
+      }
       try {
         object = page.doc.context.lookup(object) ?? undefined;
       } catch {
@@ -3648,15 +3738,11 @@ export async function exportEditedPdf(
     if (source) {
       assertPdfPageGraphWithinLimits(
         source,
-        [
-          ...new Set(
-            input.pages.flatMap((page) =>
-              page.sourcePageIndex === null
-                ? []
-                : [page.sourcePageIndex],
-            ),
-          ),
-        ],
+        input.pages.flatMap((page) =>
+          page.sourcePageIndex === null
+            ? []
+            : [page.sourcePageIndex],
+        ),
       );
     }
 

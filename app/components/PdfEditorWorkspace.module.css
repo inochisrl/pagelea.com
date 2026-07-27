@@ -990,8 +990,16 @@
   outline: 0;
 }
 
+.sourceTextPreviewMask {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  transform-origin: center;
+}
+
 .editorElement {
   position: absolute;
+  z-index: 3;
   min-width: 5px;
   min-height: 5px;
   border: 1px solid transparent;
@@ -1091,6 +1099,43 @@
   position: absolute;
   content: "";
   inset: -15px;
+}
+
+.moveHandle {
+  position: absolute;
+  z-index: 7;
+  top: -18px;
+  right: -18px;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: #087652;
+  box-shadow: 0 2px 8px rgba(23, 34, 30, 0.28);
+  color: #fff;
+  cursor: move;
+  place-items: center;
+  touch-action: none;
+}
+
+.moveHandle::before {
+  position: absolute;
+  content: "";
+  inset: -6px;
+}
+
+.moveHandle[data-edge-x="right"] {
+  right: 8px;
+}
+
+.moveHandle[data-edge-x="left"] {
+  right: auto;
+  left: 8px;
+}
+
+.moveHandle[data-edge-y="top"] {
+  top: 8px;
 }
 
 .hint {
@@ -1571,6 +1616,18 @@
   .immersive .panelHeader,
   .immersive .inspectorHeader {
     min-height: 58px;
+  }
+}
+
+@media (max-width: 1120px), (pointer: coarse) {
+  .existingTextTarget::before {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(44px, 100%);
+    height: max(44px, 100%);
+    content: "";
+    transform: translate(-50%, -50%);
   }
 }
 
