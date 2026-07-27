@@ -132,8 +132,9 @@ currently bounds:
 Each flattened page is capped at 16 megapixels. One export may flatten at most
 100 pages, use 80 megapixels across those canvases, and retain 128 MB of
 encoded page images. Pagelea lowers the render scale to fit the remaining
-aggregate pixel budget; if the page-count or encoded-byte budget is exhausted,
-the export stops with an explicit instruction to split the document.
+aggregate pixel budget but never below 72 DPI. If that minimum fidelity, the
+page-count budget, or the encoded-byte budget cannot be preserved, the export
+stops with an explicit instruction to split the document.
 
 Supply-chain inventory size, total bytes, paths, hashes, and provenance are
 bounded separately by `scripts/verify-private-rewrite-assets.mjs`.

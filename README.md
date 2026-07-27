@@ -238,7 +238,8 @@ The detailed implementation review is retained in
   page is no longer independently selectable.
 - Secure raster export is bounded to 16 megapixels per page, 100 flattened
   pages, 80 megapixels in aggregate, and 128 MB of encoded page images; split
-  a document if those safety budgets are reached.
+  a document if those safety budgets are reached. Pagelea never lowers a
+  flattened page below 72 DPI to squeeze it into the remaining budget.
 - Optimize PDF restructures supported objects and metadata but does not
   recompress embedded images.
 - Browser memory and device performance limit very large or complex documents.

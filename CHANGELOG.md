@@ -62,6 +62,9 @@ and this project follows
 - Added aggregate limits of 100 flattened pages, 80 million render pixels, and
   128 MB of encoded fallback images per export, with dynamic scale reduction
   against the remaining pixel budget.
+- Refuse to flatten below 72 DPI when the remaining aggregate pixel budget
+  cannot preserve a readable page; the export now asks the user to split the
+  document instead of silently degrading it.
 - Extend the nonce CSP only with the narrow `wasm-unsafe-eval` capability
   required by the reviewed local OCR runtime.
 - Reject unsupported Unicode combinations with precise errors rather than

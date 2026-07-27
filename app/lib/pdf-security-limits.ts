@@ -28,6 +28,7 @@ export const PDF_SECURITY_LIMITS = Object.freeze({
   maxEditorRasterCanvasPixelsTotal: 80_000_000,
   maxEditorRasterEncodedBytesTotal: 128 * 1024 * 1024,
   editorRasterTargetScale: 3,
+  editorRasterMinimumScale: 1,
   maxEditorElements: 2_000,
   maxEditorElementsPerPage: 500,
   maxEditorTextCharactersPerElement: 100_000,
@@ -623,6 +624,48 @@ export function getEditorRasterBudgetLimitIssue(
         PDF_SECURITY_LIMITS.maxEditorRasterEncodedBytesTotal,
     };
   }
+  return null;
+}
+
+export function getEditorRasterMinimumScaleLimitIssue(
+  logicalWidth: number,
+  logicalHeight: number,
+  canvasPixelBudget: number,
+): PdfSecurityLimitIssue | null {
+  const minimumScale = PDF_SECURITY_LIMITS.editorRasterMinimumScale;
+  const pagePixelBudget = Math.min(
+    PDF_SECURITY_LIMITS.maxEditorRasterCanvasPixels,
+    canvasPixelBudget,
+  );
+  const minimumWidth = Math.ceil(logicalWidth * minimumScale);
+  const minimumHeight = Math.ceil(logicalHeight * minimumScale);
+  const minimumPixels = minimumWidth * minimumHeight;
+
+  if (
+    !Number.isFinite(logicalWidth) ||
+    !Number.isFinite(logicalHeight) ||
+    logicalWidth <= 0 ||
+    logicalHeight <= 0 ||
+    !Number.isSafeInteger(canvasPixelBudget) ||
+    canvasPixelBudget < 1 ||
+    !Number.isSafeInteger(minimumWidth) ||
+    !Number.isSafeInteger(minimumHeight) ||
+    minimumWidth < 1 ||
+    minimumHeight < 1 ||
+    minimumWidth >
+      PDF_SECURITY_LIMITS.maxEditorRasterCanvasDimension ||
+    minimumHeight >
+      PDF_SECURITY_LIMITS.maxEditorRasterCanvasDimension ||
+    !Number.isSafeInteger(minimumPixels) ||
+    minimumPixels > pagePixelBudget
+  ) {
+    return {
+      code: "editor-raster-pixels-too-large",
+      maximum:
+        PDF_SECURITY_LIMITS.maxEditorRasterCanvasPixelsTotal,
+    };
+  }
+
   return null;
 }
 
