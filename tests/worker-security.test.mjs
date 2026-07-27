@@ -248,11 +248,17 @@ test("serves HTML with a per-request nonce CSP and matching script nonces", asyn
 
   const policy = response.headers.get("content-security-policy") ?? "";
   assert.match(policy, /\bdefault-src 'self'/);
-  assert.match(policy, /\bscript-src 'self' 'nonce-([a-f0-9]{32})'/);
+  assert.match(
+    policy,
+    /\bscript-src 'self' 'nonce-([a-f0-9]{32})' 'wasm-unsafe-eval'/,
+  );
   assert.match(policy, /\bobject-src 'none'/);
   assert.match(policy, /\bframe-ancestors 'none'/);
+  assert.match(policy, /\bworker-src 'self'(?:;|$)/);
+  assert.doesNotMatch(policy, /\bworker-src [^;]*\bblob:/);
   const scriptPolicy = policy.match(/(?:^|;\s*)script-src ([^;]+)/)?.[1] ?? "";
   assert.doesNotMatch(scriptPolicy, /'unsafe-eval'|'unsafe-inline'/);
+  assert.match(scriptPolicy, /'wasm-unsafe-eval'/);
 
   const nonce = policy.match(/'nonce-([a-f0-9]{32})'/)?.[1];
   assert.ok(nonce);
@@ -273,7 +279,7 @@ test("preserves HEAD semantics while applying security headers", async () => {
   assertStaticSecurityHeaders(response);
   assert.match(
     response.headers.get("content-security-policy") ?? "",
-    /\bscript-src 'self' 'nonce-[a-f0-9]{32}'/,
+    /\bscript-src 'self' 'nonce-[a-f0-9]{32}' 'wasm-unsafe-eval'/,
   );
 });
 

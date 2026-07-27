@@ -1,3 +1,5 @@
+import { createAbortError } from "./abort";
+
 export const PDF_SECURITY_LIMITS = Object.freeze({
   maxFiles: 20,
   maxBytesPerFile: 100 * 1024 * 1024,
@@ -12,10 +14,25 @@ export const PDF_SECURITY_LIMITS = Object.freeze({
   maxTextCharactersPerPage: 500_000,
   maxTextItemsPerDocument: 200_000,
   maxTextCharactersPerDocument: 10_000_000,
+  maxOcrCanvasDimension: 4_096,
+  maxOcrCanvasPixels: 12_000_000,
+  maxOcrLinesPerPage: 5_000,
+  maxOcrCharactersPerPage: 250_000,
+  maxOcrOverlapComparisons: 1_000_000,
+  ocrOverlapGridCellsPerAxis: 64,
+  maxOcrRuntimeMilliseconds: 120_000,
+  ocrTargetDpi: 300,
+  maxEditorRasterCanvasDimension: 4_096,
+  maxEditorRasterCanvasPixels: 16_000_000,
+  maxEditorRasterPages: 100,
+  maxEditorRasterCanvasPixelsTotal: 80_000_000,
+  maxEditorRasterEncodedBytesTotal: 128 * 1024 * 1024,
+  editorRasterTargetScale: 3,
   maxEditorElements: 2_000,
   maxEditorElementsPerPage: 500,
   maxEditorTextCharactersPerElement: 100_000,
   maxEditorTextCharactersTotal: 1_000_000,
+  maxEditorFontRunsPerElement: 2_048,
   maxEditorPathPointsPerElement: 4_096,
   maxEditorPathPointsTotal: 100_000,
   maxEditorImageElements: 100,
@@ -39,6 +56,12 @@ export interface LocalFileDescriptor {
 export interface TextContentBudget {
   itemCount: number;
   characterCount: number;
+}
+
+export interface EditorRasterBudget {
+  pageCount: number;
+  canvasPixelCount: number;
+  encodedByteCount: number;
 }
 
 export interface EditorResourceElement {
@@ -113,6 +136,9 @@ export type PdfSecurityLimitIssue =
         | "too-many-editor-images"
         | "editor-image-data-too-large"
         | "editor-image-pixels-too-large"
+        | "too-many-editor-raster-pages"
+        | "editor-raster-pixels-too-large"
+        | "editor-raster-bytes-too-large"
         | "pdf-object-graph-too-deep"
         | "pdf-object-graph-too-large";
       maximum: number;
@@ -560,6 +586,46 @@ export function getEditorSnapshotLimitIssue(
   return null;
 }
 
+export function getEditorRasterBudgetLimitIssue(
+  budget: Readonly<EditorRasterBudget>,
+): PdfSecurityLimitIssue | null {
+  if (
+    !Number.isSafeInteger(budget.pageCount) ||
+    budget.pageCount < 0 ||
+    budget.pageCount > PDF_SECURITY_LIMITS.maxEditorRasterPages
+  ) {
+    return {
+      code: "too-many-editor-raster-pages",
+      maximum: PDF_SECURITY_LIMITS.maxEditorRasterPages,
+    };
+  }
+  if (
+    !Number.isSafeInteger(budget.canvasPixelCount) ||
+    budget.canvasPixelCount < 0 ||
+    budget.canvasPixelCount >
+      PDF_SECURITY_LIMITS.maxEditorRasterCanvasPixelsTotal
+  ) {
+    return {
+      code: "editor-raster-pixels-too-large",
+      maximum:
+        PDF_SECURITY_LIMITS.maxEditorRasterCanvasPixelsTotal,
+    };
+  }
+  if (
+    !Number.isSafeInteger(budget.encodedByteCount) ||
+    budget.encodedByteCount < 0 ||
+    budget.encodedByteCount >
+      PDF_SECURITY_LIMITS.maxEditorRasterEncodedBytesTotal
+  ) {
+    return {
+      code: "editor-raster-bytes-too-large",
+      maximum:
+        PDF_SECURITY_LIMITS.maxEditorRasterEncodedBytesTotal,
+    };
+  }
+  return null;
+}
+
 export function getTextFieldLimitIssue(
   fieldName: string,
   value: string,
@@ -642,6 +708,12 @@ export function describePdfSecurityLimitIssue(
       return `Editor images exceed the ${formatLimitBytes(issue.maximum)} local data budget.`;
     case "editor-image-pixels-too-large":
       return `Editor images exceed the combined ${Math.round(issue.maximum / 1_000_000)}-megapixel budget.`;
+    case "too-many-editor-raster-pages":
+      return `The export needs to flatten more than ${issue.maximum} pages. Split the document and try again.`;
+    case "editor-raster-pixels-too-large":
+      return `Flattened pages exceed the combined ${Math.round(issue.maximum / 1_000_000)}-megapixel export budget. Split the document and try again.`;
+    case "editor-raster-bytes-too-large":
+      return `Flattened pages exceed the ${formatLimitBytes(issue.maximum)} encoded-image export budget. Split the document and try again.`;
     case "text-field-too-long":
       return `${issue.fieldName} exceeds the ${issue.maximum.toLocaleString("en-US")}-character limit.`;
     case "pdf-object-graph-too-deep":
@@ -649,12 +721,6 @@ export function describePdfSecurityLimitIssue(
     case "pdf-object-graph-too-large":
       return `The PDF object graph exceeds the ${issue.maximum.toLocaleString("en-US")}-object safety limit.`;
   }
-}
-
-function createAbortError(): Error {
-  const error = new Error("The operation was aborted.");
-  error.name = "AbortError";
-  return error;
 }
 
 export async function mapWithConcurrency<T, Result>(

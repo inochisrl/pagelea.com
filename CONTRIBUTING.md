@@ -44,12 +44,15 @@ npm run lint
 npm run typecheck
 npm audit --audit-level=low
 npm audit --omit=dev --audit-level=low
+npm run assets:check
 npm test
 npm run sbom -- > /tmp/pagelea-sbom.cdx.json
 git diff --check
 ```
 
 `npm test` performs a production build before executing the test suite.
+`npm run assets:check` independently verifies the pinned Private Rewrite
+workers, models, fonts, hashes, provenance, and retained licences.
 
 ## Pull-request expectations
 
@@ -62,6 +65,8 @@ A pull request should:
 - update documentation and `CHANGELOG.md` when behavior changes;
 - avoid unrelated formatting or dependency churn;
 - keep generated assets and third-party notices synchronized;
+- keep dependency patches minimal, version-pinned, documented, and covered by
+  focused tests;
 - pass required checks without weakening them.
 
 Use clear imperative commit subjects. Maintainers may squash commits during

@@ -17,6 +17,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  production-install:
+    name: Production-only install
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    env:
+      CI: "true"
+
+    steps:
+      - name: Check out the exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Use the minimum supported Node.js version
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      - name: Use the declared npm version
+        run: |
+          npm install --global npm@11.17.0 --ignore-scripts --no-audit --no-fund
+          test "$(npm --version)" = "11.17.0"
+
+      - name: Install production dependencies and apply the OCR patch
+        run: npm ci --omit=dev
+
+      - name: Verify the patched production OCR runtime
+        run: |
+          npm ls --omit=dev patch-package tesseract.js
+          node --test tests/tesseract-bootstrap-patch.test.mjs
+
   validate:
     name: Build, test, and audit
     runs-on: ubuntu-24.04
@@ -62,6 +95,9 @@ jobs:
       - name: Verify dependency licence metadata
         run: npm run licenses:check
 
+      - name: Verify pinned Private Rewrite assets
+        run: npm run assets:check
+
       - name: Build and run the complete test suite
         run: npm test
 
@@ -75,9 +111,18 @@ jobs:
           rm "$RUNNER_TEMP/pagelea-sbom-repeat.cdx.json"
           node --input-type=module <<'NODE'
           import fs from "node:fs";
+          import {
+            validatePrivateRewriteSbom,
+          } from "./scripts/generate-sbom.mjs";
 
           const packageJson = JSON.parse(
             fs.readFileSync("package.json", "utf8"),
+          );
+          const privateRewriteManifest = JSON.parse(
+            fs.readFileSync(
+              "config/private-rewrite-assets.v1.json",
+              "utf8",
+            ),
           );
           const sbom = JSON.parse(
             fs.readFileSync(
@@ -113,6 +158,7 @@ jobs:
           ) {
             throw new Error("Invalid CycloneDX SBOM");
           }
+          validatePrivateRewriteSbom(sbom, privateRewriteManifest);
           NODE
 
       - name: Upload SBOM evidence

@@ -1,0 +1,540 @@
+{
+  "schemaVersion": 1,
+  "assetRoot": "public/private-rewrite",
+  "bundledComponents": [
+    {
+      "assetPath": "ocr/worker.min.js",
+      "integrity": "sha512-FTiCpNxtwiZZHEZbcbTIcZjERVICn9yq/pDFkTl95/AxzD1naBctN7YO68riM/gLSDY7sdrMby8hofADYuuqOA==",
+      "license": "MIT",
+      "licensePath": "public/licenses/private-rewrite/buffer-MIT.txt",
+      "name": "buffer",
+      "purl": "pkg:npm/buffer@6.0.3",
+      "upstream": {
+        "commit": "088fd9709e95f96b1f64d1c55ed3c50a19c73e9f",
+        "path": "index.js",
+        "repository": "https://github.com/feross/buffer.git",
+        "transform": "bundled-by-webpack-in-tesseract.js@7.0.0"
+      },
+      "version": "6.0.3"
+    },
+    {
+      "assetPath": "ocr/worker.min.js",
+      "integrity": "sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==",
+      "license": "BSD-3-Clause",
+      "licensePath": "public/licenses/private-rewrite/ieee754-BSD-3-Clause.txt",
+      "name": "ieee754",
+      "purl": "pkg:npm/ieee754@1.2.1",
+      "upstream": {
+        "commit": "b60d148be9cad718f9ff007c211c2427cdc180a4",
+        "path": "index.js",
+        "repository": "https://github.com/feross/ieee754.git",
+        "transform": "bundled-by-webpack-in-tesseract.js@7.0.0"
+      },
+      "version": "1.2.1"
+    },
+    {
+      "assetPath": "ocr/worker.min.js",
+      "integrity": "sha512-kY1AZVr2Ra+t+piVaJ4gxaFaReZVH40AKNo7UCX6W+dEwBo/2oZJzqfuN1qLq1oL45o56cPaTXELwrTh8Fpggg==",
+      "license": "MIT",
+      "licensePath": "public/licenses/private-rewrite/regenerator-runtime-MIT.txt",
+      "name": "regenerator-runtime",
+      "purl": "pkg:npm/regenerator-runtime@0.13.11",
+      "upstream": {
+        "commit": "e4b592a44ef0d3a366cc7ad6125c4d9c8f6cc597",
+        "path": "packages/runtime/runtime.js",
+        "repository": "https://github.com/facebook/regenerator.git",
+        "transform": "bundled-by-webpack-in-tesseract.js@7.0.0"
+      },
+      "version": "0.13.11"
+    },
+    {
+      "assetPath": "ocr/worker.min.js",
+      "integrity": "sha512-+J9RrgTKOmlxFSDHo0pI1xM6BLVUv+o0ZT9ANtCxGkjIVCCUdx9alUF8Gm+dGLKbkkkidWIHFDZHDMpfITt4+w==",
+      "license": "MIT",
+      "licensePath": "public/licenses/private-rewrite/zlibjs-MIT.txt",
+      "name": "zlibjs",
+      "purl": "pkg:npm/zlibjs@0.3.1",
+      "upstream": {
+        "commit": "2701521273ed7a9741c9a7827fa8de51d8843f7f",
+        "path": "bin/node-zlib.js",
+        "repository": "https://github.com/imaya/zlib.js.git",
+        "transform": "bundled-by-webpack-in-tesseract.js@7.0.0"
+      },
+      "version": "0.3.1"
+    }
+  ],
+  "assets": [
+    {
+      "path": "fonts/NotoSans-Bold.ttf",
+      "bytes": 575740,
+      "sha256": "c976e4b1b99edc88775377fcc21692ca4bfa46b6d6ca6522bfda505b28ff9d6a",
+      "license": "OFL-1.1",
+      "licensePath": "public/licenses/private-rewrite/noto-fonts-OFL-1.1.txt",
+      "upstream": {
+        "commit": "ffebf8c1ee449e544955a7e813c54f9b73848eac",
+        "path": "hinted/ttf/NotoSans/NotoSans-Bold.ttf",
+        "repository": "https://github.com/notofonts/noto-fonts.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "path": "fonts/NotoSans-BoldItalic.ttf",
+      "bytes": 555292,
+      "sha256": "6edf4227ef0fa846aca70e86a307804ca4401741830f5b3af0f2554abe2b8466",
+      "license": "OFL-1.1",
+      "licensePath": "public/licenses/private-rewrite/noto-fonts-OFL-1.1.txt",
+      "upstream": {
+        "commit": "ffebf8c1ee449e544955a7e813c54f9b73848eac",
+        "path": "hinted/ttf/NotoSans/NotoSans-BoldItalic.ttf",
+        "repository": "https://github.com/notofonts/noto-fonts.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "path": "fonts/NotoSans-Condensed.ttf",
+      "bytes": 562276,
+      "sha256": "5c15b8bb0ac1bbd533917b23968c6f0a420f143533e1293cc575f4f9dd543be8",
+      "license": "OFL-1.1",
+      "licensePath": "public/licenses/private-rewrite/noto-fonts-OFL-1.1.txt",
+      "upstream": {
+        "commit": "ffebf8c1ee449e544955a7e813c54f9b73848eac",
+        "path": "hinted/ttf/NotoSans/NotoSans-Condensed.ttf",
+        "repository": "https://github.com/notofonts/noto-fonts.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "path": "fonts/NotoSans-CondensedBold.ttf",
+      "bytes": 574012,
+      "sha256": "4a0ebfb80ea6875f9362d3fbb0b6d03568ff43fb60cbc6ebbbc97b2096507bae",
+      "license": "OFL-1.1",
+      "licensePath": "public/licenses/private-rewrite/noto-fonts-OFL-1.1.txt",
+      "upstream": {
+        "commit": "ffebf8c1ee449e544955a7e813c54f9b73848eac",
+        "path": "hinted/ttf/NotoSans/NotoSans-CondensedBold.ttf",
+        "repository": "https://github.com/notofonts/noto-fonts.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "path": "fonts/NotoSans-CondensedBoldItalic.ttf",
+      "bytes": 554584,
+      "sha256": "29138d47e54746bc3b6102028e72725caf496aeb4603bb95601363a9d072476d",
+      "license": "OFL-1.1",
+      "licensePath": "public/licenses/private-rewrite/noto-fonts-OFL-1.1.txt",
+      "upstream": {
+        "commit": "ffebf8c1ee449e544955a7e813c54f9b73848eac",
+        "path": "hinted/ttf/NotoSans/NotoSans-CondensedBoldItalic.ttf",
+        "repository": "https://github.com/notofonts/noto-fonts.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "path": "fonts/NotoSans-CondensedItalic.ttf",
+      "bytes": 552792,
+      "sha256": "5a2a813f8d32bf4b13e2bda49227ee6baa3936933e6b83898abba8c19b2ad0cb",
+      "license": "OFL-1.1",
+      "licensePath": "public/licenses/private-rewrite/noto-fonts-OFL-1.1.txt",
+      "upstream": {
+        "commit": "ffebf8c1ee449e544955a7e813c54f9b73848eac",
+        "path": "hinted/ttf/NotoSans/NotoSans-CondensedItalic.ttf",
+        "repository": "https://github.com/notofonts/noto-fonts.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "path": "fonts/NotoSans-Italic.ttf",
+      "bytes": 552776,
+      "sha256": "36cff144df01309dab648bea71baff9bb074026914afe63aeacc8bc90b67a28b",
+      "license": "OFL-1.1",
+      "licensePath": "public/licenses/private-rewrite/noto-fonts-OFL-1.1.txt",
+      "upstream": {
+        "commit": "ffebf8c1ee449e544955a7e813c54f9b73848eac",
+        "path": "hinted/ttf/NotoSans/NotoSans-Italic.ttf",
+        "repository": "https://github.com/notofonts/noto-fonts.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "path": "fonts/NotoSans-Regular.ttf",
+      "bytes": 569208,
+      "sha256": "b85c38ecea8a7cfb39c24e395a4007474fa5a4fc864f6ee33309eb4948d232d5",
+      "license": "OFL-1.1",
+      "licensePath": "public/licenses/private-rewrite/noto-fonts-OFL-1.1.txt",
+      "upstream": {
+        "commit": "ffebf8c1ee449e544955a7e813c54f9b73848eac",
+        "path": "hinted/ttf/NotoSans/NotoSans-Regular.ttf",
+        "repository": "https://github.com/notofonts/noto-fonts.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "path": "fonts/NotoSansArabic-Bold.ttf",
+      "bytes": 248468,
+      "sha256": "ed2711b387750ae991b6a980b8dd16fdd65e6702b97e9f52adf3a8edf09ef4df",
+      "license": "OFL-1.1",
+      "licensePath": "public/licenses/private-rewrite/noto-fonts-OFL-1.1.txt",
+      "upstream": {
+        "commit": "ffebf8c1ee449e544955a7e813c54f9b73848eac",
+        "path": "hinted/ttf/NotoSansArabic/NotoSansArabic-Bold.ttf",
+        "repository": "https://github.com/notofonts/noto-fonts.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "path": "fonts/NotoSansArabic-Regular.ttf",
+      "bytes": 240456,
+      "sha256": "ceea25b464a656dc3b26849bab9356740401af62aedf1bfa8b7f0d9b75925b1b",
+      "license": "OFL-1.1",
+      "licensePath": "public/licenses/private-rewrite/noto-fonts-OFL-1.1.txt",
+      "upstream": {
+        "commit": "ffebf8c1ee449e544955a7e813c54f9b73848eac",
+        "path": "hinted/ttf/NotoSansArabic/NotoSansArabic-Regular.ttf",
+        "repository": "https://github.com/notofonts/noto-fonts.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "path": "fonts/NotoSansHebrew-Bold.ttf",
+      "bytes": 27164,
+      "sha256": "a30243d1c625eaf63bb889f036fe9de97e81d9248976f89e6e4252f9668c832e",
+      "license": "OFL-1.1",
+      "licensePath": "public/licenses/private-rewrite/noto-fonts-OFL-1.1.txt",
+      "upstream": {
+        "commit": "ffebf8c1ee449e544955a7e813c54f9b73848eac",
+        "path": "hinted/ttf/NotoSansHebrew/NotoSansHebrew-Bold.ttf",
+        "repository": "https://github.com/notofonts/noto-fonts.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "path": "fonts/NotoSansHebrew-Regular.ttf",
+      "bytes": 26900,
+      "sha256": "a7fa16fffb27bedb060a0866267c29e9859aeb9c21cc33f5b3aaf6eb062eca85",
+      "license": "OFL-1.1",
+      "licensePath": "public/licenses/private-rewrite/noto-fonts-OFL-1.1.txt",
+      "upstream": {
+        "commit": "ffebf8c1ee449e544955a7e813c54f9b73848eac",
+        "path": "hinted/ttf/NotoSansHebrew/NotoSansHebrew-Regular.ttf",
+        "repository": "https://github.com/notofonts/noto-fonts.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "path": "fonts/NotoSansJP[wght].ttf",
+      "bytes": 9589900,
+      "sha256": "c2f3b4d463500a2ddcd3849cded1fceeb9fd6d1c32e6cbecd568453ba50fc68f",
+      "license": "OFL-1.1",
+      "licensePath": "public/licenses/private-rewrite/google-fonts-noto-sans-jp-OFL-1.1.txt",
+      "upstream": {
+        "commit": "295d98a7a0c17c68f1341eaeea354e7960ea70d3",
+        "path": "ofl/notosansjp/NotoSansJP[wght].ttf",
+        "repository": "https://github.com/google/fonts.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "path": "fonts/NotoSansMono-Bold.ttf",
+      "bytes": 525664,
+      "sha256": "beb857bd799a114de7d5d90cc75cc69f4b6ee8d401f4ab20697e6f9719a66dfc",
+      "license": "OFL-1.1",
+      "licensePath": "public/licenses/private-rewrite/noto-fonts-OFL-1.1.txt",
+      "upstream": {
+        "commit": "ffebf8c1ee449e544955a7e813c54f9b73848eac",
+        "path": "hinted/ttf/NotoSansMono/NotoSansMono-Bold.ttf",
+        "repository": "https://github.com/notofonts/noto-fonts.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "path": "fonts/NotoSansMono-Regular.ttf",
+      "bytes": 512836,
+      "sha256": "d9e2b23d19f8230be7146f409a52b1d23117e635e28f2e2892cf91b7382f325b",
+      "license": "OFL-1.1",
+      "licensePath": "public/licenses/private-rewrite/noto-fonts-OFL-1.1.txt",
+      "upstream": {
+        "commit": "ffebf8c1ee449e544955a7e813c54f9b73848eac",
+        "path": "hinted/ttf/NotoSansMono/NotoSansMono-Regular.ttf",
+        "repository": "https://github.com/notofonts/noto-fonts.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "path": "fonts/NotoSansSymbols2-Regular.ttf",
+      "bytes": 656852,
+      "sha256": "630846d528dbe4c4981370a4d0a9475a1fd1491a129bb411f8e157cdb5de13c6",
+      "license": "OFL-1.1",
+      "licensePath": "public/licenses/private-rewrite/noto-fonts-OFL-1.1.txt",
+      "upstream": {
+        "commit": "ffebf8c1ee449e544955a7e813c54f9b73848eac",
+        "path": "hinted/ttf/NotoSansSymbols2/NotoSansSymbols2-Regular.ttf",
+        "repository": "https://github.com/notofonts/noto-fonts.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "path": "fonts/NotoSerif-Bold.ttf",
+      "bytes": 638164,
+      "sha256": "3b2086a869bcded2aeb4416fc281ceec9d6ce3c06756cda19f8f763636204e7d",
+      "license": "OFL-1.1",
+      "licensePath": "public/licenses/private-rewrite/noto-fonts-OFL-1.1.txt",
+      "upstream": {
+        "commit": "ffebf8c1ee449e544955a7e813c54f9b73848eac",
+        "path": "hinted/ttf/NotoSerif/NotoSerif-Bold.ttf",
+        "repository": "https://github.com/notofonts/noto-fonts.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "path": "fonts/NotoSerif-BoldItalic.ttf",
+      "bytes": 675428,
+      "sha256": "4fb8737145b4a503d548af4b517afdfc532e44a96ac15378257e825741334eec",
+      "license": "OFL-1.1",
+      "licensePath": "public/licenses/private-rewrite/noto-fonts-OFL-1.1.txt",
+      "upstream": {
+        "commit": "ffebf8c1ee449e544955a7e813c54f9b73848eac",
+        "path": "hinted/ttf/NotoSerif/NotoSerif-BoldItalic.ttf",
+        "repository": "https://github.com/notofonts/noto-fonts.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "path": "fonts/NotoSerif-Italic.ttf",
+      "bytes": 657092,
+      "sha256": "0ea81d6b54fc8aa5dff0fd6ebe7cfa431e9e6cf747a8d4aa33581fa0aaccffea",
+      "license": "OFL-1.1",
+      "licensePath": "public/licenses/private-rewrite/noto-fonts-OFL-1.1.txt",
+      "upstream": {
+        "commit": "ffebf8c1ee449e544955a7e813c54f9b73848eac",
+        "path": "hinted/ttf/NotoSerif/NotoSerif-Italic.ttf",
+        "repository": "https://github.com/notofonts/noto-fonts.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "path": "fonts/NotoSerif-Regular.ttf",
+      "bytes": 616196,
+      "sha256": "c8f669ceb2c9c60ccf55198b305e08a997ffca79a38cc7eeb551e643cbe66505",
+      "license": "OFL-1.1",
+      "licensePath": "public/licenses/private-rewrite/noto-fonts-OFL-1.1.txt",
+      "upstream": {
+        "commit": "ffebf8c1ee449e544955a7e813c54f9b73848eac",
+        "path": "hinted/ttf/NotoSerif/NotoSerif-Regular.ttf",
+        "repository": "https://github.com/notofonts/noto-fonts.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "path": "ocr/core/tesseract-core-lstm.wasm.js",
+      "bytes": 3896484,
+      "sha256": "eef5f8b2f8e20e150680b20adaec4a60babafee3adbe8a94583c81fee46e8680",
+      "license": "Apache-2.0",
+      "licensePath": "public/licenses/private-rewrite/tesseract-js-core-Apache-2.0.txt",
+      "upstream": {
+        "commit": "acffef2b66eb44a31df297e11d905f4b39001068",
+        "path": "tesseract-core-lstm.wasm.js",
+        "repository": "https://github.com/naptha/tesseract.js-core.git",
+        "transform": "verbatim-from-npm:tesseract.js-core@7.0.0"
+      }
+    },
+    {
+      "path": "ocr/core/tesseract-core-relaxedsimd-lstm.wasm.js",
+      "bytes": 3905767,
+      "sha256": "861a536cf9ef8e63cb644d57bab39c388f37f7d6b6f60024b741c5f6b39a59b3",
+      "license": "Apache-2.0",
+      "licensePath": "public/licenses/private-rewrite/tesseract-js-core-Apache-2.0.txt",
+      "upstream": {
+        "commit": "acffef2b66eb44a31df297e11d905f4b39001068",
+        "path": "tesseract-core-relaxedsimd-lstm.wasm.js",
+        "repository": "https://github.com/naptha/tesseract.js-core.git",
+        "transform": "verbatim-from-npm:tesseract.js-core@7.0.0"
+      }
+    },
+    {
+      "path": "ocr/core/tesseract-core-simd-lstm.wasm.js",
+      "bytes": 3899472,
+      "sha256": "c58b46a4c796c0b8afccf77591d5b875b6896b45d402bbce8caa6f5362447b38",
+      "license": "Apache-2.0",
+      "licensePath": "public/licenses/private-rewrite/tesseract-js-core-Apache-2.0.txt",
+      "upstream": {
+        "commit": "acffef2b66eb44a31df297e11d905f4b39001068",
+        "path": "tesseract-core-simd-lstm.wasm.js",
+        "repository": "https://github.com/naptha/tesseract.js-core.git",
+        "transform": "verbatim-from-npm:tesseract.js-core@7.0.0"
+      }
+    },
+    {
+      "path": "ocr/lang/eng.traineddata",
+      "bytes": 4113088,
+      "sha256": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
+      "license": "Apache-2.0",
+      "licensePath": "public/licenses/private-rewrite/tessdata-fast-Apache-2.0.txt",
+      "upstream": {
+        "commit": "87416418657359cb625c412a48b6e1d6d41c29bd",
+        "path": "eng.traineddata",
+        "repository": "https://github.com/tesseract-ocr/tessdata_fast.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "path": "ocr/lang/ita.traineddata",
+      "bytes": 2701314,
+      "sha256": "b8f89e1e785118dac4d51ae042c029a64edb5c3ee42ef73027a6d412748d8827",
+      "license": "Apache-2.0",
+      "licensePath": "public/licenses/private-rewrite/tessdata-fast-Apache-2.0.txt",
+      "upstream": {
+        "commit": "87416418657359cb625c412a48b6e1d6d41c29bd",
+        "path": "ita.traineddata",
+        "repository": "https://github.com/tesseract-ocr/tessdata_fast.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "path": "ocr/worker.min.js",
+      "bytes": 111307,
+      "sha256": "576b7df7e3393e137e51849357c9adb53fe7ac1bb69bfa06cf3d61520f182c6d",
+      "license": "Apache-2.0 AND MIT AND BSD-3-Clause",
+      "licensePaths": [
+        "public/licenses/private-rewrite/tesseract-js-Apache-2.0.txt",
+        "public/licenses/private-rewrite/buffer-MIT.txt",
+        "public/licenses/private-rewrite/ieee754-BSD-3-Clause.txt",
+        "public/licenses/private-rewrite/regenerator-runtime-MIT.txt",
+        "public/licenses/private-rewrite/zlibjs-MIT.txt"
+      ],
+      "upstream": {
+        "commit": "42eae669e4b3a66429d8516f078912cc747a89df",
+        "path": "dist/worker.min.js",
+        "repository": "https://github.com/naptha/tesseract.js.git",
+        "transform": "verbatim-from-npm:tesseract.js@7.0.0"
+      }
+    },
+    {
+      "path": "ocr/worker.min.js.LICENSE.txt",
+      "bytes": 466,
+      "sha256": "45f54171aeaa1d10c0c1a66f374b7bba1f02472b1487fbe892eec04f840002ac",
+      "license": "MIT AND BSD-3-Clause",
+      "licensePaths": [
+        "public/licenses/private-rewrite/buffer-MIT.txt",
+        "public/licenses/private-rewrite/ieee754-BSD-3-Clause.txt",
+        "public/licenses/private-rewrite/regenerator-runtime-MIT.txt",
+        "public/licenses/private-rewrite/zlibjs-MIT.txt"
+      ],
+      "upstream": {
+        "commit": "42eae669e4b3a66429d8516f078912cc747a89df",
+        "path": "dist/worker.min.js.LICENSE.txt",
+        "repository": "https://github.com/naptha/tesseract.js.git",
+        "transform": "verbatim-from-npm:tesseract.js@7.0.0"
+      }
+    }
+  ],
+  "licenses": [
+    {
+      "bytes": 1106,
+      "path": "public/licenses/private-rewrite/buffer-MIT.txt",
+      "sha256": "06bafa45fdad2579ba0e43b0c9b2c6290287c99c4203c300254a462b38a307f6",
+      "spdx": "MIT",
+      "upstream": {
+        "commit": "088fd9709e95f96b1f64d1c55ed3c50a19c73e9f",
+        "path": "LICENSE",
+        "repository": "https://github.com/feross/buffer.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "bytes": 4388,
+      "path": "public/licenses/private-rewrite/google-fonts-noto-sans-jp-OFL-1.1.txt",
+      "sha256": "1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9",
+      "spdx": "OFL-1.1",
+      "upstream": {
+        "commit": "295d98a7a0c17c68f1341eaeea354e7960ea70d3",
+        "path": "ofl/notosansjp/OFL.txt",
+        "repository": "https://github.com/google/fonts.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "bytes": 1465,
+      "path": "public/licenses/private-rewrite/ieee754-BSD-3-Clause.txt",
+      "sha256": "18d45466ba3253deae04667e267a91ea8de8548f18c1125264d1c9db28194cc1",
+      "spdx": "BSD-3-Clause",
+      "upstream": {
+        "commit": "b60d148be9cad718f9ff007c211c2427cdc180a4",
+        "path": "LICENSE",
+        "repository": "https://github.com/feross/ieee754.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "bytes": 4377,
+      "path": "public/licenses/private-rewrite/noto-fonts-OFL-1.1.txt",
+      "sha256": "0dab92d0544f7b233403f14b84a663bdbfa746982eda629e7f4f9ffe1b036feb",
+      "spdx": "OFL-1.1",
+      "upstream": {
+        "commit": "ffebf8c1ee449e544955a7e813c54f9b73848eac",
+        "path": "LICENSE",
+        "repository": "https://github.com/notofonts/noto-fonts.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "bytes": 1080,
+      "path": "public/licenses/private-rewrite/regenerator-runtime-MIT.txt",
+      "sha256": "51887a3d47051ac2fce1210562e5b9fe0830a8a8fabeb272c2d586eeb18a05fd",
+      "spdx": "MIT",
+      "upstream": {
+        "commit": "e4b592a44ef0d3a366cc7ad6125c4d9c8f6cc597",
+        "path": "packages/runtime/LICENSE",
+        "repository": "https://github.com/facebook/regenerator.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "bytes": 11358,
+      "path": "public/licenses/private-rewrite/tessdata-fast-Apache-2.0.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "spdx": "Apache-2.0",
+      "upstream": {
+        "commit": "87416418657359cb625c412a48b6e1d6d41c29bd",
+        "path": "LICENSE",
+        "repository": "https://github.com/tesseract-ocr/tessdata_fast.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "bytes": 11357,
+      "path": "public/licenses/private-rewrite/tesseract-js-Apache-2.0.txt",
+      "sha256": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1",
+      "spdx": "Apache-2.0",
+      "upstream": {
+        "commit": "42eae669e4b3a66429d8516f078912cc747a89df",
+        "path": "LICENSE.md",
+        "repository": "https://github.com/naptha/tesseract.js.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "bytes": 11358,
+      "path": "public/licenses/private-rewrite/tesseract-js-core-Apache-2.0.txt",
+      "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+      "spdx": "Apache-2.0",
+      "upstream": {
+        "commit": "acffef2b66eb44a31df297e11d905f4b39001068",
+        "path": "LICENSE",
+        "repository": "https://github.com/naptha/tesseract.js-core.git",
+        "transform": "verbatim"
+      }
+    },
+    {
+      "bytes": 1222,
+      "path": "public/licenses/private-rewrite/zlibjs-MIT.txt",
+      "sha256": "131afe3f7bdce1698beb292fb8de1a968de01bce876122a60ef5db230471c866",
+      "spdx": "MIT",
+      "upstream": {
+        "commit": "2701521273ed7a9741c9a7827fa8de51d8843f7f",
+        "path": "LICENSE",
+        "repository": "https://github.com/imaya/zlib.js.git",
+        "transform": "verbatim"
+      }
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+# These files intentionally preserve byte-exact upstream whitespace.
+patches/*.patch -whitespace
+public/licenses/private-rewrite/** -whitespace

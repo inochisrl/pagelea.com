@@ -1,3 +1,163 @@
+@font-face {
+  font-family: "Pagelea Noto Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/private-rewrite/fonts/NotoSans-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Pagelea Noto Sans";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/private-rewrite/fonts/NotoSans-Bold.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Pagelea Noto Sans";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/private-rewrite/fonts/NotoSans-Italic.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Pagelea Noto Sans";
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/private-rewrite/fonts/NotoSans-BoldItalic.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Pagelea Noto Sans Condensed";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/private-rewrite/fonts/NotoSans-Condensed.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Pagelea Noto Sans Condensed";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/private-rewrite/fonts/NotoSans-CondensedBold.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Pagelea Noto Sans Condensed";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/private-rewrite/fonts/NotoSans-CondensedItalic.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Pagelea Noto Sans Condensed";
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/private-rewrite/fonts/NotoSans-CondensedBoldItalic.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Pagelea Noto Serif";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/private-rewrite/fonts/NotoSerif-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Pagelea Noto Serif";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/private-rewrite/fonts/NotoSerif-Bold.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Pagelea Noto Serif";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/private-rewrite/fonts/NotoSerif-Italic.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Pagelea Noto Serif";
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/private-rewrite/fonts/NotoSerif-BoldItalic.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Pagelea Noto Sans Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/private-rewrite/fonts/NotoSansMono-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Pagelea Noto Sans Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/private-rewrite/fonts/NotoSansMono-Bold.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Pagelea Noto Arabic";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/private-rewrite/fonts/NotoSansArabic-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Pagelea Noto Arabic";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/private-rewrite/fonts/NotoSansArabic-Bold.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Pagelea Noto Hebrew";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/private-rewrite/fonts/NotoSansHebrew-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Pagelea Noto Hebrew";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/private-rewrite/fonts/NotoSansHebrew-Bold.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Pagelea Noto CJK";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/private-rewrite/fonts/NotoSansJP%5Bwght%5D.ttf") format("truetype-variations");
+}
+
+@font-face {
+  font-family: "Pagelea Noto Symbols 2";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/private-rewrite/fonts/NotoSansSymbols2-Regular.ttf") format("truetype");
+}
+
 .workspace {
   width: min(1480px, calc(100vw - 32px));
   margin: 0 auto clamp(48px, 8vw, 96px);
@@ -592,6 +752,16 @@
 }
 
 @media (pointer: coarse) {
+  .exportButton,
+  .addPageButton {
+    min-height: 44px;
+  }
+
+  .iconButton {
+    width: 44px;
+    height: 44px;
+  }
+
   .thumbIcon {
     width: 44px;
     height: 44px;
@@ -925,15 +1095,24 @@
 
 .hint {
   display: flex;
-  min-height: 34px;
+  min-height: 54px;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
+  gap: 14px;
   border-top: 1px solid #d1d8d3;
   background: #f6f7f3;
-  padding: 6px 12px;
+  padding: 7px 12px;
   color: #606b66;
   font-size: 0.68rem;
   font-weight: 660;
+}
+
+.hintText {
+  flex: 1 1 220px;
+  margin: 0;
+}
+
+.hintText:only-child {
   text-align: center;
 }
 
@@ -995,6 +1174,39 @@
   color: #49705e;
   font-size: 0.64rem;
   line-height: 1.42;
+}
+
+.sourceTextMetadata {
+  display: grid;
+  gap: 6px;
+  margin: 8px 15px 0;
+  border: 1px solid #dde4df;
+  border-radius: 10px;
+  background: #f8f9f5;
+  padding: 9px 10px;
+}
+
+.sourceTextMetadata div {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(72px, auto) minmax(0, 1fr);
+  gap: 8px;
+  font-size: 0.62rem;
+}
+
+.sourceTextMetadata dt {
+  color: #69766f;
+  font-weight: 720;
+}
+
+.sourceTextMetadata dd {
+  overflow: hidden;
+  margin: 0;
+  color: #25322c;
+  font-weight: 680;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .field {
@@ -1206,8 +1418,7 @@
   height: 100%;
   border-radius: inherit;
   background: var(--green);
-  transform-origin: left;
-  transition: transform 180ms ease;
+  transition: width 180ms ease;
 }
 
 .errorBanner {
@@ -1562,7 +1773,7 @@
   }
 
   .immersive .hint {
-    min-height: 30px;
+    min-height: 54px;
     padding-block: 4px;
     line-height: 1.35;
   }
@@ -1640,6 +1851,19 @@
 
   .immersive .progressTrack {
     display: none;
+  }
+
+  .immersive .hint {
+    min-height: 0;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 6px;
+    padding: 7px;
+  }
+
+  .immersive .hintText {
+    flex-basis: 100%;
+    text-align: left;
   }
 }
 
@@ -1733,6 +1957,12 @@
 
   .immersive .hint {
     display: none;
+  }
+
+  .immersive[data-tool="edit-text"] .hint {
+    display: flex;
+    max-height: 132px;
+    overflow: auto;
   }
 
   .immersive .toolDock {

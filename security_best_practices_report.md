@@ -1,14 +1,14 @@
-# Pagelea 0.2.2 Security and Release Review
+# Pagelea 0.4.0 Security and Release Review
 
-- **Review date:** 2026-07-26
+- **Review date:** 2026-07-27
 - **Owner:** Inochi SRL
-- **Target:** Pagelea Community 0.2.2
+- **Target:** Pagelea Community 0.4.0
 - **Licence:** AGPL-3.0-or-later
 - **Scope:** the current release-candidate source tree
 
 ## Executive summary
 
-Pagelea 0.2.2 is a free and open-source, browser-based PDF workbench. Its
+Pagelea 0.4.0 is a free and open-source, browser-based PDF workbench. Its
 published document workflows process selected files in the user's browser.
 The application has no document-upload endpoint, cloud document library,
 consumer account API, checkout, subscription, entitlement, payment webhook, or
@@ -26,10 +26,13 @@ expansion, too many content streams, and oversized individual strings. Inputs
 that cannot be rewritten conservatively use the existing in-browser raster
 fallback.
 
-There is one mandatory **operational P1 publication gate**: the historical
-maintainer repository must not simply be made public. A sanitized clean-root
-public history must be created and verified because deleting maintainer-only
-files from the tip does not remove them from earlier commits.
+The repository is already public. Its reachable history contains a retired
+`MEMORY.md` file in nine older commits; the file is absent from the current
+tree, remains ignored, and the complete reachable-history scan found no secret.
+A history rewrite cannot retract that prior exposure and is **not** a 0.4.0
+release prerequisite. It remains separately tracked governance debt: any future
+rewrite requires explicit owner approval and a verified, access-controlled
+backup before public refs are changed.
 
 This is a source-assisted security review and regression exercise. It is not an
 external penetration test, malware certification, accessibility certification,
@@ -63,6 +66,30 @@ The review covered:
 - the D1 schema and destructive retirement migration;
 - dependency advisories, source leakage, GitHub Actions, CodeQL, Dependabot,
   SBOM generation, and public-history requirements.
+
+### Private Rewrite 0.4.0 review delta
+
+Version 0.4.0 adds local English/Italian OCR, reviewed Unicode export fonts,
+and font matching. The review additionally covered:
+
+- fixed same-origin Tesseract worker, WebAssembly, language-model, and font
+  paths with `workerBlobURL: false` and no document-upload fallback;
+- explicit OCR canvas, pixel, runtime, line, character, spatial-comparison,
+  font-run, font-fetch, and per-page plus aggregate raster-export budgets;
+- cancellation, worker disposal, stale-result rejection, and bounded
+  main-thread overlap deduplication;
+- a versioned asset inventory with exact size, SHA-256, upstream revision,
+  transformation, and retained-licence verification;
+- searchable Unicode output with bounded reviewed font embedding, while
+  unsupported scripts and unsafe right-to-left combinations are rejected
+  explicitly;
+- OCR source-pixel cleanup before the flattened PNG is created;
+- fail-closed flattening for annotations, page additional actions, associated
+  files, presentation actions, thumbnails, metadata, article beads, and other
+  reviewed non-visual page payload entries before any vector page copy;
+- the narrow `wasm-unsafe-eval` CSP capability required by the pinned local
+  Tesseract core, without adding general `unsafe-eval` or remote script
+  origins.
 
 ## Data and trust boundaries
 
@@ -121,11 +148,12 @@ must never be used for billing, fraud, security, or audited usage decisions.
 ### Content Security Policy and response headers
 
 HTML responses receive a fresh per-request nonce. The script policy permits
-only same-origin scripts carrying that nonce and contains neither
-`unsafe-inline` nor `unsafe-eval`. The policy also restricts connections to the
-application origin and workers to same-origin or local Blob URLs, denies
-objects and framing, disables base URL changes, and limits form submissions to
-the same origin.
+only same-origin scripts carrying that nonce, contains neither `unsafe-inline`
+nor the general `unsafe-eval` capability, and grants only the narrower
+`wasm-unsafe-eval` capability required by the reviewed local Tesseract core.
+The policy also restricts connections and workers to the application origin,
+denies objects and framing, disables base URL changes, and limits form
+submissions to the same origin.
 
 Inline styles remain permitted because of the current framework output. This
 does not authorize inline scripts and should be revisited if the build can emit
@@ -205,7 +233,10 @@ the browser to rasterize that source page, removes the old visual text in the
 rendered result, and writes the replacement text into the exported PDF. The
 fallback does not upload the page, but it can reduce searchability,
 accessibility, zoom fidelity, and print fidelity for unaffected content on that
-page.
+page. Rasterization is capped at 16 million pixels per page, 100 pages and
+80 million pixels per export, plus 128 MB of encoded page images. Scale is
+reduced against the remaining aggregate pixel budget, and exhausted
+page/image budgets fail closed.
 
 Existing-text replacement is an editing feature, not a certified secure
 redaction workflow. Users must not rely on it as the sole control for regulated
@@ -283,16 +314,23 @@ The current checks produced:
 
 | Check | Result |
 | --- | --- |
-| Targeted PDF, Worker, analytics, and free-product tests | 43 passed, 0 failed |
-| Full production build and test suite | 115 passed, 0 failed |
+| Clean install on Node 22.13.0 / npm 11.17.0 | Passed; dependency patch reapplied |
+| Production-only `npm ci --omit=dev` | Passed; dependency patch reapplied and 7 focused runtime tests passed |
+| Full production build and test suite | 206 passed, 0 failed |
+| TypeScript and ESLint | Passed |
 | `npm audit --audit-level=low` | 0 vulnerabilities |
 | `npm audit --omit=dev --audit-level=low` | 0 vulnerabilities |
-| D1 migration split and SQLite integrity exercise | Passed |
+| Dependency licence metadata | 388 packages reviewed |
+| Private Rewrite assets and retained licences | 27 assets, 4 worker-bundle components, and 9 licences verified |
+| Deterministic CycloneDX SBOM | Passed; root is Pagelea 0.4.0 / AGPL-3.0-or-later |
+| Real Chromium OCR/edit/export smoke test | Passed; worker, WASM, `eng`, `ita`, and export font served same-origin with HTTP 200; no console or failed-response finding |
+| Export inspection | OCR replacement removed the old searchable text; Unicode LGC/Japanese/Hebrew/Arabic output rendered and extracted correctly |
 | `git diff --check` | Passed |
-| Gitleaks full reachable history scan | 13 commits scanned, no finding |
+| Gitleaks full reachable history scan | Passed on all reachable refs, no finding |
+| Historical D1 migration split and SQLite integrity exercise | Passed |
 
 An advisory or secret scan is point-in-time evidence, not proof that every
-dependency or blob is safe. The first public release must publish the SBOM and
+dependency or blob is safe. The 0.4.0 release must publish the SBOM and
 checksums produced from the exact public commit and must enable repository
 secret scanning, push protection, private vulnerability reporting, branch
 protection, and required CI checks.
@@ -301,29 +339,18 @@ Licence metadata allowlisting is an engineering gate, not a legal conclusion.
 AGPL source-offer, notices, bundled third-party licences, contributor authority,
 and trademark requirements remain separate release obligations.
 
-## Mandatory public-history gate
+## Historical repository debt
 
-The existing maintainer history contains a retired maintainer-only memory file.
-Removing it in the release commit does not remove it from earlier commits.
-Consequently, changing the visibility of that history is not an approved
-publication method even though the current secret scan reported no credential.
+The already-public history contains a retired maintainer-memory file in nine
+older commits. It is absent from the current tree, remains ignored, and the
+complete reachable history scan found no secret. Rewriting a repository that
+is already public cannot retract prior exposure and would invalidate existing
+clones, tags, and source links, so it is not a 0.4.0 release prerequisite.
 
-The public repository must be created from a clean root or an independently
-reviewed history rewrite. Before publication:
-
-1. preserve a verified, access-controlled backup of the maintainer repository
-   and all refs;
-2. construct the public history from the exact validated source tree while
-   excluding maintainer memory, local state, generated output, environment
-   files, credentials, and private artifacts;
-3. compare the candidate public tree byte-for-byte with the validated release
-   tree, documenting only intentional exclusions;
-4. inspect commits, tags, notes, large blobs, deleted files, artifacts, and
-   non-default refs;
-5. scan the complete candidate history with at least two independent secret
-   detection methods;
-6. verify an anonymous clone, locked install, build, tests, licence detection,
-   SBOM, source links, issue templates, and security-advisory path.
+This remains governance debt. Any future history rewrite requires a verified
+access-controlled backup, independent review of every ref and release artifact,
+a byte-for-byte comparison with the validated tree, renewed secret scanning,
+and explicit owner approval before force-updating public refs.
 
 `.openai/hosting.json` is intentionally public deployment configuration. Its
 opaque Sites project identifier and binding names are not credentials and grant
@@ -355,9 +382,10 @@ open untrusted documents on a device where a browser failure is unacceptable.
 
 ### PDF fidelity and accessibility — Product limitation
 
-The vector rewrite supports only text it can identify unambiguously. Scanned
-documents need OCR, complex font encodings and shaped scripts can fall back or
-fail explicitly, and the raster fallback reduces accessibility and
+The vector rewrite supports only text it can identify unambiguously. Private
+Rewrite recognizes English and Italian scans locally, but OCR accuracy,
+complex font encodings, arbitrary fonts, and unsupported shaped scripts can
+fall back or fail explicitly. Raster fallback reduces accessibility and
 selectability for the affected page. Replacement is not word-processor reflow.
 
 ### Sanitization scope — Product limitation
@@ -381,12 +409,10 @@ independently verified scheduled job.
 
 ## Release decision
 
-Pagelea Community 0.2.2 is suitable for a public free/open-source beta only
+Pagelea Community 0.4.0 is suitable for a public free/open-source beta only
 after all of the following are true for the exact release commit:
 
-- the clean-root public-history gate is complete;
 - the current CI build, tests, audits, CodeQL, and SBOM checks pass;
-- the destructive D1 migration has an approved, verified recovery point;
 - repository branch protection, secret scanning, push protection, and private
   vulnerability reporting are enabled;
 - the deployed origin is smoke-tested for all eight tools, hidden routes, API
@@ -398,5 +424,7 @@ after all of the following are true for the exact release commit:
 
 Subject to those operational gates, the reviewed tree has no known P0 or P1
 code blocker. This approval does not expand the API surface, authorize document
-uploads, certify secure redaction, or approve publication of the historical
-maintainer repository.
+uploads, certify secure redaction, or authorize a future history rewrite. The
+already-public maintainer-memory file remains documented governance debt, not a
+0.4.0 release prerequisite. Version 0.4.0 contains no D1 schema migration; the
+historical destructive migration and its recovery requirements are unchanged.

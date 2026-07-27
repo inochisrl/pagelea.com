@@ -28,8 +28,10 @@ build, rendering, privacy, security, and PDF regression tests.
 The project is suitable for evaluation and ordinary documents, but it is not
 yet a lossless replacement for a professional PDF content-stream editor.
 Compatible existing-text edits preserve the original page and unaffected
-searchable content. Ambiguous encodings, nested forms, annotations, and other
-complex cases intentionally use a safe flattened fallback; see
+searchable content. Private Rewrite recognizes English and Italian scans in
+the browser, and validated embedded fonts keep supported Unicode replacements
+searchable. Ambiguous encodings, nested forms, annotations, and other complex
+cases intentionally use a safe flattened fallback; see
 [Known limitations](#known-limitations).
 
 ## Why Pagelea
@@ -39,6 +41,12 @@ complex cases intentionally use a safe flattened fallback; see
 - **Open source:** the privacy boundary and transformation logic are
   inspectable.
 - **No account required:** open a tool, select a file, and download the result.
+- **Private Rewrite:** recognize English or Italian scanned text locally,
+  replace a selected line, and export searchable text without a document
+  upload.
+- **Validated Unicode:** reviewed local fonts cover Latin, Greek, Cyrillic,
+  Japanese, pure Arabic, pure Hebrew, and a reviewed symbol set; supported
+  faces are subsetted except the explicitly tested Symbols 2 fallback.
 - **Document-first editor:** a full-viewport workspace with fit-page zoom,
   collapsible desktop panels, mobile sheets, and native touch pan and pinch.
 - **Self-contained:** PDF.js worker, CMaps, fonts, and WebAssembly helpers are
@@ -50,7 +58,7 @@ complex cases intentionally use a safe flattened fallback; see
 
 | Tool | Route | What it does |
 | --- | --- | --- |
-| PDF Editor | `/tools/pdf-editor` | Uses an immersive desktop and mobile workspace to replace supported existing text and add text, images, shapes, highlights, whiteout, freehand marks, signatures, and page operations. |
+| PDF Editor | `/tools/pdf-editor` | Uses an immersive desktop and mobile workspace to replace native or locally recognized scanned text, preserve supported vectors, export validated Unicode, and add text, images, shapes, highlights, whiteout, freehand marks, signatures, and page operations. |
 | Sign PDF | `/tools/sign-pdf` | Adds typed, drawn, or uploaded signatures and text. |
 | Merge PDF | `/tools/merge-pdf` | Combines ordered PDFs, JPGs, and PNGs. |
 | Organize PDF | `/tools/organize-pdf` | Reorders, rotates, removes, and adds pages. |
@@ -97,8 +105,11 @@ Browser
   |-- PDF.js
   |     `-- local parsing, rendering, and text geometry
   |
+  |-- Tesseract.js
+  |     `-- cancellable English / Italian OCR using same-origin assets
+  |
   |-- pdf-lib
-  |     `-- local document transformations and export
+  |     `-- local transformations, reviewed font embedding, and export
   |
   `-- local Blob / ZIP download
 
@@ -116,12 +127,18 @@ Important locations:
 | `app/components/ToolWorkspace.tsx` | Merge, split, optimize, conversion, and sanitization workflows |
 | `app/lib/pdf-actions.ts` | PDF transformations |
 | `app/lib/pdf-editor-export.ts` | Editor export path |
+| `app/lib/pdf-local-ocr.ts` | Bounded, cancellable local OCR session |
+| `app/lib/pdf-editor-fonts.ts` | Unicode support policy, local font loading, and bounded embedding |
+| `app/lib/pdf-font-matching.ts` | Source-font normalization and editor font matching |
 | `app/lib/pdf-editor-viewport.ts` | Responsive fit-page and fit-width calculations |
 | `app/lib/pdf-security-limits.ts` | Canonical resource budgets |
 | `shared/public-tools.ts` | Public tool allowlist |
 | `worker/` | Edge routing, policy, and optional hosted APIs |
 | `tests/` | Production, privacy, security, and regression coverage |
 | `public/pdfjs/` | Self-hosted PDF.js runtime assets and notices |
+| `public/private-rewrite/` | Pinned OCR and Unicode font assets |
+| `config/private-rewrite-assets.v1.json` | Reviewed asset sizes, hashes, licences, and provenance |
+| `patches/tesseract.js+7.0.0.patch` | Reviewed OCR cancellation and worker-cleanup patch applied by the locked install |
 
 ## Local development
 
@@ -158,6 +175,7 @@ data.
 | `npm test` | Build and run the complete Node test suite |
 | `npm run licenses:list` | Emit installed package metadata as JSON |
 | `npm run licenses:check` | Reject missing or unreviewed licence metadata |
+| `npm run assets:check` | Verify every pinned Private Rewrite asset and reject inventory drift |
 | `npm run sbom` | Emit a CycloneDX JSON SBOM |
 
 The complete contributor gate is documented in
@@ -201,14 +219,26 @@ The detailed implementation review is retained in
 
 ## Known limitations
 
-- Existing-text replacement supports extractable text and a bounded set of
-  fonts and glyphs; scanned PDFs need OCR, which Pagelea does not currently
-  provide.
+- Private Rewrite currently recognizes English, Italian, or both. OCR accuracy
+  depends on scan resolution, contrast, rotation, language, and layout; always
+  compare the export with the original.
+- Searchable Unicode export is validated for Latin, Greek, Cyrillic,
+  Japanese/Han covered by the Japanese Noto face, pure Arabic letters and
+  spaces, pure Hebrew letters and spaces, and a reviewed symbol set.
+  Arabic/Hebrew mixed with digits, punctuation, left-to-right text or
+  combining marks, Indic scripts, Hangul, and emoji fail with an explicit
+  error instead of silently producing malformed or unsearchable text.
 - Compatible text-show operators are neutralized in the original content
   stream and replacements are drawn as searchable vector text. Ambiguous
   encodings, nested form content, annotations, or unsupported streams use a
   fail-closed raster fallback; that page can lose selection, accessibility
   structure, and vector fidelity.
+- OCR-backed replacements always use that secure raster path on the affected
+  source page after removing the old pixels; unrelated source text on that
+  page is no longer independently selectable.
+- Secure raster export is bounded to 16 megapixels per page, 100 flattened
+  pages, 80 megapixels in aggregate, and 128 MB of encoded page images; split
+  a document if those safety budgets are reached.
 - Optimize PDF restructures supported objects and metadata but does not
   recompress embedded images.
 - Browser memory and device performance limit very large or complex documents.
@@ -219,6 +249,10 @@ The detailed implementation review is retained in
 
 Keep the original file and verify every exported document before relying on
 it.
+
+The exact workflow, support matrix, privacy boundary, resource budgets, and
+verification evidence are documented in
+[Private Rewrite](docs/PRIVATE_REWRITE.md).
 
 ## Contributing
 

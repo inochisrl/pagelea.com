@@ -1,5 +1,9 @@
 import type { PDFPageProxy } from "pdfjs-dist";
 
+import {
+  createAbortError,
+  throwIfAborted as throwIfSignalAborted,
+} from "./abort";
 import type { PdfPreviewDocument } from "./pdf-preview";
 import {
   describePdfSecurityLimitIssue,
@@ -8,6 +12,7 @@ import {
 } from "./pdf-security-limits";
 
 export type PdfQuarterTurn = 0 | 90 | 180 | 270;
+export type PdfTextFragmentOrigin = "native" | "ocr";
 
 export interface NormalizedPdfTextPoint {
   /**
@@ -45,6 +50,9 @@ export interface ExtractedPdfTextFragment {
   id: string;
   pageIndex: number;
   itemIndex: number;
+  origin: PdfTextFragmentOrigin;
+  /** OCR confidence in the inclusive 0..100 range, when applicable. */
+  confidence?: number;
   text: string;
   x: number;
   y: number;
@@ -79,7 +87,6 @@ export interface ExtractedPdfTextFragment {
   vertical: boolean;
   hasEOL: boolean;
   hasGeometry: boolean;
-  markedContentIds: string[];
 }
 
 export interface ExtractedPdfTextPage {
@@ -226,14 +233,8 @@ export function normalizePdfTextRotation(
   return 0;
 }
 
-function abortError(): Error {
-  const error = new Error("PDF text extraction was aborted.");
-  error.name = "AbortError";
-  return error;
-}
-
 function throwIfAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) throw abortError();
+  throwIfSignalAborted(signal, "PDF text extraction was aborted.");
 }
 
 function textContentStats(
@@ -364,13 +365,13 @@ function textItemSignature(item: RuntimeTextItem): string {
 function stableFragmentId(
   documentId: string,
   pageIndex: number,
+  itemIndex: number,
   item: RuntimeTextItem,
-  occurrence: number,
 ): string {
   const documentHash = hashString(documentId || "document");
   const itemHash = hashString(textItemSignature(item));
 
-  return `pdf-text-${documentHash}-p${pageIndex}-${itemHash}-${occurrence}`;
+  return `pdf-text-${documentHash}-p${pageIndex}-i${itemIndex}-${itemHash}`;
 }
 
 function isRuntimeTextItem(
@@ -381,23 +382,6 @@ function isRuntimeTextItem(
     item !== null &&
     typeof (item as Partial<PdfJsTextItemLike>).str === "string"
   );
-}
-
-function isMarkedContentStart(
-  item: PdfJsTextMarkedContentLike,
-): boolean {
-  return (
-    item.type === "beginMarkedContent" ||
-    item.type === "beginMarkedContentProps"
-  );
-}
-
-function markedContentId(
-  item: PdfJsTextMarkedContentLike,
-): string | null {
-  return typeof item.id === "string" && item.id.trim()
-    ? item.id
-    : null;
 }
 
 function byteToHex(value: number): string {
@@ -525,9 +509,7 @@ function missingGeometryFragment(
     >
   >,
   itemIndex: number,
-  occurrence: number,
   style: RuntimeTextStyle,
-  markedContentIds: string[],
 ): ExtractedPdfTextFragment {
   const fontName =
     typeof item.fontName === "string" ? item.fontName : "";
@@ -546,11 +528,12 @@ function missingGeometryFragment(
     id: stableFragmentId(
       options.documentId,
       options.pageIndex,
+      itemIndex,
       item,
-      occurrence,
     ),
     pageIndex: options.pageIndex,
     itemIndex,
+    origin: "native",
     text: item.str,
     x: 0,
     y: 0,
@@ -572,21 +555,18 @@ function missingGeometryFragment(
     vertical: style.vertical === true,
     hasEOL: item.hasEOL === true,
     hasGeometry: false,
-    markedContentIds: [...markedContentIds],
   };
 }
 
 function mapTextItem(
   item: RuntimeTextItem,
   itemIndex: number,
-  occurrence: number,
   style: RuntimeTextStyle,
   viewport: PdfTextViewportLike,
   viewportTransform: Matrix,
   viewportScale: number,
   documentId: string,
   pageIndex: number,
-  activeMarkedContentIds: string[],
 ): ExtractedPdfTextFragment {
   const textTransform = toMatrix(item.transform);
   if (!textTransform) {
@@ -594,9 +574,7 @@ function mapTextItem(
       item,
       { documentId, pageIndex },
       itemIndex,
-      occurrence,
       style,
-      activeMarkedContentIds,
     );
   }
 
@@ -680,11 +658,12 @@ function mapTextItem(
     id: stableFragmentId(
       documentId,
       pageIndex,
+      itemIndex,
       item,
-      occurrence,
     ),
     pageIndex,
     itemIndex,
+    origin: "native",
     text: item.str,
     x: clippedLeft / viewport.width,
     y: clippedTop / viewport.height,
@@ -740,7 +719,6 @@ function mapTextItem(
     vertical,
     hasEOL: item.hasEOL === true,
     hasGeometry: true,
-    markedContentIds: [...activeMarkedContentIds],
   };
 }
 
@@ -782,20 +760,10 @@ export function mapPdfTextContent(
     1;
   const includeEmpty = options.includeEmpty === true;
   const documentId = options.documentId?.trim() || "document";
-  const activeMarkedContent: Array<string | null> = [];
-  const signatureOccurrences = new Map<string, number>();
   const fragments: ExtractedPdfTextFragment[] = [];
 
   textContent.items.forEach((contentItem, itemIndex) => {
     if (!isRuntimeTextItem(contentItem)) {
-      if (isMarkedContentStart(contentItem)) {
-        activeMarkedContent.push(markedContentId(contentItem));
-      } else if (
-        contentItem.type === "endMarkedContent" &&
-        activeMarkedContent.length > 0
-      ) {
-        activeMarkedContent.pop();
-      }
       return;
     }
 
@@ -807,25 +775,16 @@ export function mapPdfTextContent(
     const style =
       (textContent.styles[fontName] as RuntimeTextStyle | undefined) ??
       {};
-    const signature = textItemSignature(item);
-    const occurrence = signatureOccurrences.get(signature) ?? 0;
-    signatureOccurrences.set(signature, occurrence + 1);
-    const markedContentIds = activeMarkedContent.filter(
-      (id): id is string => id !== null,
-    );
-
     fragments.push(
       mapTextItem(
         item,
         itemIndex,
-        occurrence,
         style,
         viewport,
         viewportTransform,
         viewportScale,
         documentId,
         options.pageIndex,
-        markedContentIds,
       ),
     );
   });
@@ -891,7 +850,9 @@ async function readLimitedTextContent(
   };
   let completed = false;
   const onAbort = () => {
-    void reader.cancel(abortError()).catch(() => undefined);
+    void reader
+      .cancel(createAbortError("PDF text extraction was aborted."))
+      .catch(() => undefined);
   };
   options.signal?.addEventListener("abort", onAbort, { once: true });
 

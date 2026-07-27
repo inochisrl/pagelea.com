@@ -23,7 +23,7 @@ const PAGES = {
     eyebrow: "About Pagelea",
     title: "Documents are serious. PDF software doesn’t have to be.",
     lead: "Pagelea is an independent Inochi SRL product: free, open-source PDF software built around calm workflows and inspectable privacy.",
-    updated: "26 July 2026",
+    updated: "27 July 2026",
     icon: HeartHandshake,
     sections: [
       [
@@ -52,7 +52,7 @@ const PAGES = {
     eyebrow: "Security",
     title: "Your files deserve a short trip.",
     lead: "For the eight published workflows, document bytes stay inside your browser. Pagelea’s open-source, local-processing architecture reduces the systems that can receive a private file.",
-    updated: "26 July 2026",
+    updated: "27 July 2026",
     icon: ShieldCheck,
     sections: [
       [
@@ -77,7 +77,7 @@ const PAGES = {
       ],
       [
         "Honest limits",
-        "Sanitize & Flatten reduces the active structures covered by its documented checks, but no PDF tool can certify that an adversarial file is harmless. Scanned text requires OCR, and complex fonts or layouts may not be editable.",
+        "Sanitize & Flatten reduces the active structures covered by its documented checks, but no PDF tool can certify that an adversarial file is harmless. Private Rewrite can recognize English and Italian scans locally; OCR accuracy, complex fonts, and complex layouts still require manual review.",
       ],
     ],
   },
@@ -85,7 +85,7 @@ const PAGES = {
     eyebrow: "Privacy",
     title: "The shortest privacy policy is the best architecture.",
     lead: "This notice explains how Inochi Srl handles personal data when you visit Pagelea, use the local PDF workspace or contact the company.",
-    updated: "26 July 2026",
+    updated: "27 July 2026",
     icon: LockKeyhole,
     sections: [
       [
@@ -220,7 +220,7 @@ const PAGES = {
     eyebrow: "Help centre",
     title: "The fastest answer is usually in the workflow.",
     lead: "Pagelea keeps controls contextual and error messages specific. If something still feels unclear, these are the best places to start.",
-    updated: "26 July 2026",
+    updated: "27 July 2026",
     icon: BookOpen,
     sections: [
       [
@@ -237,7 +237,7 @@ const PAGES = {
       ],
       [
         "Limits and compatibility",
-        "Pagelea supports PDF, JPG and PNG in the workflows that list them. Scanned text needs OCR and cannot yet be rewritten. Resource limits protect your tab; an explicit error means the file must be reduced or processed in smaller groups.",
+        "Pagelea supports PDF, JPG and PNG in the workflows that list them. In PDF Editor, Private Rewrite recognizes English or Italian scanned text locally before you edit it. OCR and Unicode support are explicit rather than universal, and every export should be compared with the original. Resource limits protect your tab; an explicit error means the file must be reduced or processed in smaller groups.",
       ],
       [
         "Contact support",

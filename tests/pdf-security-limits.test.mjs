@@ -308,6 +308,52 @@ test("bounds all resource-bearing editor element types", () => {
   );
 });
 
+test("bounds aggregate raster pages, pixels, and encoded bytes", () => {
+  const policy = limits.PDF_SECURITY_LIMITS;
+  const withinBudget = {
+    pageCount: policy.maxEditorRasterPages,
+    canvasPixelCount:
+      policy.maxEditorRasterCanvasPixelsTotal,
+    encodedByteCount:
+      policy.maxEditorRasterEncodedBytesTotal,
+  };
+
+  assert.equal(
+    limits.getEditorRasterBudgetLimitIssue(withinBudget),
+    null,
+  );
+  assert.deepEqual(
+    limits.getEditorRasterBudgetLimitIssue({
+      ...withinBudget,
+      pageCount: withinBudget.pageCount + 1,
+    }),
+    {
+      code: "too-many-editor-raster-pages",
+      maximum: policy.maxEditorRasterPages,
+    },
+  );
+  assert.deepEqual(
+    limits.getEditorRasterBudgetLimitIssue({
+      ...withinBudget,
+      canvasPixelCount: withinBudget.canvasPixelCount + 1,
+    }),
+    {
+      code: "editor-raster-pixels-too-large",
+      maximum: policy.maxEditorRasterCanvasPixelsTotal,
+    },
+  );
+  assert.deepEqual(
+    limits.getEditorRasterBudgetLimitIssue({
+      ...withinBudget,
+      encodedByteCount: withinBudget.encodedByteCount + 1,
+    }),
+    {
+      code: "editor-raster-bytes-too-large",
+      maximum: policy.maxEditorRasterEncodedBytesTotal,
+    },
+  );
+});
+
 test("decimates long strokes while preserving endpoints", () => {
   const values = Array.from({ length: 20 }, (_, index) => index);
   const decimated = limits.decimateSequence(values, 6);

@@ -1,0 +1,300 @@
+diff --git a/node_modules/tesseract.js/src/createWorker.js b/node_modules/tesseract.js/src/createWorker.js
+index 89b53b8..0c40a00 100644
+--- a/node_modules/tesseract.js/src/createWorker.js
++++ b/node_modules/tesseract.js/src/createWorker.js
+@@ -18,13 +18,17 @@ let workerCounter = 0;
+ 
+ module.exports = async (langs = 'eng', oem = OEM.LSTM_ONLY, _options = {}, config = {}) => {
+   const id = getId('Worker', workerCounter);
++  const {
++    workerAbortSignal,
++    ...workerOptions
++  } = _options;
+   const {
+     logger,
+     errorHandler,
+     ...options
+   } = resolvePaths({
+     ...defaultOptions,
+-    ..._options,
++    ...workerOptions,
+   });
+   const promises = {};
+ 
+@@ -41,15 +45,55 @@ module.exports = async (langs = 'eng', oem = OEM.LSTM_ONLY, _options = {}, confi
+     workerResResolve = resolve;
+     workerResReject = reject;
+   });
+-  const workerError = (event) => { workerResReject(event.message); };
+-
+   let worker = spawnWorker(options);
++  let bootstrapSettled = false;
++  let abortBootstrap;
++  let terminalError;
++
++  const cleanupBootstrap = () => {
++    if (workerAbortSignal && abortBootstrap) {
++      workerAbortSignal.removeEventListener('abort', abortBootstrap);
++    }
++    abortBootstrap = undefined;
++  };
++
++  const workerFailureError = (reason) => {
++    if (reason instanceof Error) return reason;
++    const error = new Error(typeof reason === 'string' ? reason : 'Tesseract worker failed.');
++    return error;
++  };
++
++  const failWorker = (reason) => {
++    const wasBootstrapping = !bootstrapSettled;
++    if (wasBootstrapping) {
++      bootstrapSettled = true;
++      cleanupBootstrap();
++    }
++    const error = workerFailureError(reason);
++    terminalError = error;
++    if (worker !== null) {
++      worker.onerror = null;
++      terminateWorker(worker);
++      worker = null;
++    }
++    Object.keys(promises).forEach((promiseId) => {
++      promises[promiseId].reject(error);
++      delete promises[promiseId];
++    });
++    if (wasBootstrapping) workerResReject(error);
++  };
++
++  const workerError = (event) => { failWorker(event.message); };
+   worker.onerror = workerError;
+ 
+   workerCounter += 1;
+ 
+   const startJob = ({ id: jobId, action, payload }) => (
+     new Promise((resolve, reject) => {
++      if (worker === null) {
++        reject(terminalError || new Error('Tesseract worker is not available.'));
++        return;
++      }
+       log(`[${id}]: Start ${jobId}, action=${action}`);
+       // Using both `action` and `jobId` in case user provides non-unique `jobId`.
+       const promiseId = `${action}-${jobId}`;
+@@ -167,11 +211,11 @@ module.exports = async (langs = 'eng', oem = OEM.LSTM_ONLY, _options = {}, confi
+ 
+   const recognize = async (image, opts = {}, output = {
+     text: true,
+-  }, jobId) => (
++  }, jobId, signal) => (
+     startJob(createJob({
+       id: jobId,
+       action: 'recognize',
+-      payload: { image: await loadImage(image), options: opts, output },
++      payload: { image: await loadImage(image, signal), options: opts, output },
+     }))
+   );
+ 
+@@ -203,6 +247,7 @@ module.exports = async (langs = 'eng', oem = OEM.LSTM_ONLY, _options = {}, confi
+     workerId, jobId, status, action, data,
+   }) => {
+     const promiseId = `${action}-${jobId}`;
++    if (!promises[promiseId]) return;
+     if (status === 'resolve') {
+       log(`[${workerId}]: Complete ${jobId}`);
+       promises[promiseId].resolve({ jobId, data });
+@@ -210,7 +255,6 @@ module.exports = async (langs = 'eng', oem = OEM.LSTM_ONLY, _options = {}, confi
+     } else if (status === 'reject') {
+       promises[promiseId].reject(data);
+       delete promises[promiseId];
+-      if (action === 'load') workerResReject(data);
+       if (errorHandler) {
+         errorHandler(data);
+       } else {
+@@ -236,11 +280,31 @@ module.exports = async (langs = 'eng', oem = OEM.LSTM_ONLY, _options = {}, confi
+     terminate,
+   };
+ 
+-  loadInternal()
+-    .then(() => loadLanguageInternal(langs))
+-    .then(() => initializeInternal(langs, oem, config))
+-    .then(() => workerResResolve(resolveObj))
+-    .catch(() => {});
++  abortBootstrap = () => {
++    const error = new Error('Tesseract worker bootstrap was aborted.');
++    error.name = 'AbortError';
++    failWorker(error);
++  };
++  if (workerAbortSignal) {
++    if (workerAbortSignal.aborted) {
++      abortBootstrap();
++    } else {
++      workerAbortSignal.addEventListener('abort', abortBootstrap, { once: true });
++    }
++  }
++
++  if (!bootstrapSettled) {
++    loadInternal()
++      .then(() => loadLanguageInternal(langs))
++      .then(() => initializeInternal(langs, oem, config))
++      .then(() => {
++        if (bootstrapSettled) return;
++        bootstrapSettled = true;
++        cleanupBootstrap();
++        workerResResolve(resolveObj);
++      })
++      .catch(failWorker);
++  }
+ 
+   return workerRes;
+ };
+diff --git a/node_modules/tesseract.js/src/worker/browser/loadImage.js b/node_modules/tesseract.js/src/worker/browser/loadImage.js
+index 4d6e14e..635010e 100644
+--- a/node_modules/tesseract.js/src/worker/browser/loadImage.js
++++ b/node_modules/tesseract.js/src/worker/browser/loadImage.js
+@@ -7,15 +7,50 @@
+  * @function
+  * @access private
+  */
+-const readFromBlobOrFile = (blob) => (
++const createAbortError = () => {
++  const error = new Error('Tesseract image loading was aborted.');
++  error.name = 'AbortError';
++  return error;
++};
++
++const readFromBlobOrFile = (blob, signal) => (
+   new Promise((resolve, reject) => {
+     const fileReader = new FileReader();
++    let settled = false;
++    const cleanup = () => {
++      signal?.removeEventListener('abort', onAbort);
++      fileReader.onload = null;
++      fileReader.onerror = null;
++      fileReader.onabort = null;
++    };
++    const resolveOnce = (value) => {
++      if (settled) return;
++      settled = true;
++      cleanup();
++      resolve(value);
++    };
++    const rejectOnce = (error) => {
++      if (settled) return;
++      settled = true;
++      cleanup();
++      reject(error);
++    };
++    const onAbort = () => {
++      if (fileReader.readyState === FileReader.LOADING) fileReader.abort();
++      rejectOnce(createAbortError());
++    };
+     fileReader.onload = () => {
+-      resolve(fileReader.result);
++      resolveOnce(fileReader.result);
+     };
+     fileReader.onerror = ({ target: { error: { code } } }) => {
+-      reject(Error(`File could not be read! Code=${code}`));
++      rejectOnce(Error(`File could not be read! Code=${code}`));
+     };
++    fileReader.onabort = () => rejectOnce(createAbortError());
++    if (signal?.aborted) {
++      rejectOnce(createAbortError());
++      return;
++    }
++    signal?.addEventListener('abort', onAbort, { once: true });
+     fileReader.readAsArrayBuffer(blob);
+   })
+ );
+@@ -27,7 +62,8 @@ const readFromBlobOrFile = (blob) => (
+  * @function load image from different source
+  * @access private
+  */
+-const loadImage = async (image) => {
++const loadImage = async (image, signal) => {
++  if (signal?.aborted) throw createAbortError();
+   let data = image;
+   if (typeof image === 'undefined') {
+     return 'undefined';
+@@ -40,31 +76,56 @@ const loadImage = async (image) => {
+         .split('')
+         .map((c) => c.charCodeAt(0));
+     } else {
+-      const resp = await fetch(image);
++      const resp = await fetch(image, { signal });
+       data = await resp.arrayBuffer();
+     }
+   } else if (typeof HTMLElement !== 'undefined' && image instanceof HTMLElement) {
+     if (image.tagName === 'IMG') {
+-      data = await loadImage(image.src);
++      data = await loadImage(image.src, signal);
+     }
+     if (image.tagName === 'VIDEO') {
+-      data = await loadImage(image.poster);
++      data = await loadImage(image.poster, signal);
+     }
+     if (image.tagName === 'CANVAS') {
+-      await new Promise((resolve) => {
+-        image.toBlob(async (blob) => {
+-          data = await readFromBlobOrFile(blob);
++      await new Promise((resolve, reject) => {
++        let settled = false;
++        const cleanup = () => signal?.removeEventListener('abort', onAbort);
++        const resolveOnce = (value) => {
++          if (settled) return;
++          settled = true;
++          cleanup();
++          data = value;
+           resolve();
++        };
++        const rejectOnce = (error) => {
++          if (settled) return;
++          settled = true;
++          cleanup();
++          reject(error);
++        };
++        const onAbort = () => rejectOnce(createAbortError());
++        if (signal?.aborted) {
++          rejectOnce(createAbortError());
++          return;
++        }
++        signal?.addEventListener('abort', onAbort, { once: true });
++        image.toBlob((blob) => {
++          if (!blob) {
++            rejectOnce(Error('Canvas could not be converted to an image blob.'));
++            return;
++          }
++          readFromBlobOrFile(blob, signal).then(resolveOnce, rejectOnce);
+         });
+       });
+     }
+   } else if (typeof OffscreenCanvas !== 'undefined' && image instanceof OffscreenCanvas) {
+     const blob = await image.convertToBlob();
+-    data = await readFromBlobOrFile(blob);
++    data = await readFromBlobOrFile(blob, signal);
+   } else if (image instanceof File || image instanceof Blob) {
+-    data = await readFromBlobOrFile(image);
++    data = await readFromBlobOrFile(image, signal);
+   }
+ 
++  if (signal?.aborted) throw createAbortError();
+   return new Uint8Array(data);
+ };
+ 
+diff --git a/node_modules/tesseract.js/src/worker/browser/send.js b/node_modules/tesseract.js/src/worker/browser/send.js
+index ea01877..33b7f14 100644
+--- a/node_modules/tesseract.js/src/worker/browser/send.js
++++ b/node_modules/tesseract.js/src/worker/browser/send.js
+@@ -8,5 +8,13 @@
+  * @access public
+  */
+ module.exports = async (worker, packet) => {
+-  worker.postMessage(packet);
++  const image = packet?.action === 'recognize' && packet?.payload?.image;
++  if (
++    ArrayBuffer.isView(image)
++    && image.buffer instanceof ArrayBuffer
++  ) {
++    worker.postMessage(packet, [image.buffer]);
++  } else {
++    worker.postMessage(packet);
++  }
+ };

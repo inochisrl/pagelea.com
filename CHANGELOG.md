@@ -8,6 +8,88 @@ and this project follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-27
+
+### Added
+
+- Added Private Rewrite to recognize English, Italian, or combined
+  English-and-Italian scanned text entirely in the browser.
+- Added source-font normalization, local font matching, and a reviewed editor
+  palette covering sans, serif, mono, condensed, Japanese, Arabic, Hebrew, and
+  symbol roles.
+- Added searchable Unicode export with reviewed local fonts for Latin, Greek,
+  Cyrillic, Japanese/Han, pure Arabic, pure Hebrew, and a validated symbol
+  set. Every supported face is subsetted except Symbols 2, whose tested subset
+  loses outlines in current PDF renderers.
+- Added a versioned asset manifest with exact sizes, SHA-256 digests, upstream
+  revisions, transformations, licences, and an inventory verifier.
+- Added regression coverage for OCR geometry, mixed native/OCR pages,
+  cancellation, resource budgets, font selection, Unicode extraction,
+  subsetting, vector preservation, CSP, and asset provenance.
+
+### Changed
+
+- Kept the original PDF page and native vectors intact when replacing
+  compatible native text. OCR-derived edits repair the selected pixels before
+  securely rasterizing the affected page, so old scan pixels cannot remain
+  recoverable below the replacement.
+- Made line wrapping word-aware and grapheme-safe, with explicit overflow
+  errors instead of silent clipping or character loss.
+- Rounded editor geometry to practical decimal values and exposed source
+  origin, OCR confidence, matched font, recognition language, and writing
+  direction in the inspector.
+
+### Performance
+
+- Load Tesseract, recognition models, fontkit, and Unicode fonts only when the
+  active operation needs them.
+- Reuse OCR workers and loaded font bytes, and subset replacement glyphs for
+  every supported face except the deliberately complete Symbols 2 fallback.
+- Reuse one in-flight font load and one embedded font per export even when
+  callers observe cancellation independently.
+
+### Security
+
+- Serve all OCR workers, WebAssembly loaders, language models, and export fonts
+  from fixed same-origin paths with no document-upload or third-party asset
+  request.
+- Bound OCR canvas dimensions, pixels, lines, characters, and runtime; support
+  cancellation and deterministic cleanup.
+- Patched the locked Tesseract browser wrapper so bootstrap failures,
+  cancellation, and runtime crashes terminate their worker and reject pending
+  jobs; image loading observes abort signals; and recognition buffers transfer
+  without an extra full copy.
+- Added aggregate limits of 100 flattened pages, 80 million render pixels, and
+  128 MB of encoded fallback images per export, with dynamic scale reduction
+  against the remaining pixel budget.
+- Extend the nonce CSP only with the narrow `wasm-unsafe-eval` capability
+  required by the reviewed local OCR runtime.
+- Reject unsupported Unicode combinations with precise errors rather than
+  silently substituting glyphs or producing unsearchable output.
+
+### Fixed
+
+- Prevented duplicate editable runs when a mixed PDF contains native text over
+  scanned regions.
+- Prevented stale OCR results from a previous page or cancelled recognition
+  session from replacing current editor state.
+- Shipped uncompressed trained-data assets so static hosts serve them
+  consistently without changing their contents.
+- Preserved previous OCR results after cancellation and announced the
+  cancellation state accessibly.
+- Forced pages carrying annotations, additional actions, associated files,
+  hidden metadata, thumbnails, or presentation payloads through the static
+  raster path instead of copying their active page dictionary.
+- Bounded native/OCR overlap work and removed marked-content ancestry that
+  could multiply extraction memory without a runtime consumer.
+- Preserved non-uniform vector backgrounds during compatible native text
+  replacement instead of painting an opaque cleanup rectangle.
+
+### Removed
+
+- Removed eight unused Indic and Thai font files that were not part of the
+  validated export support matrix.
+
 ## [0.3.1] - 2026-07-26
 
 ### Fixed

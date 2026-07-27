@@ -4,8 +4,16 @@ import test from "node:test";
 
 const projectRoot = new URL("../", import.meta.url);
 
-const [editorSource, editorCss, exportSource, toolsSource, toolRouteSource] =
-  await Promise.all([
+const [
+  editorSource,
+  editorCss,
+  exportSource,
+  toolsSource,
+  toolRouteSource,
+  privateRewriteSource,
+  privateRewriteCss,
+  localOcrSource,
+] = await Promise.all([
   readFile(
     new URL("app/components/PdfEditorWorkspace.tsx", projectRoot),
     "utf8",
@@ -17,6 +25,18 @@ const [editorSource, editorCss, exportSource, toolsSource, toolRouteSource] =
   readFile(new URL("app/lib/pdf-editor-export.ts", projectRoot), "utf8"),
   readFile(new URL("app/lib/tools.ts", projectRoot), "utf8"),
   readFile(new URL("app/tools/[slug]/page.tsx", projectRoot), "utf8"),
+  readFile(
+    new URL("app/components/PrivateRewriteControls.tsx", projectRoot),
+    "utf8",
+  ),
+  readFile(
+    new URL(
+      "app/components/PrivateRewriteControls.module.css",
+      projectRoot,
+    ),
+    "utf8",
+  ),
+  readFile(new URL("app/lib/pdf-local-ocr.ts", projectRoot), "utf8"),
 ]);
 
 test("editor uses an immersive, viewport-owned application shell", () => {
@@ -170,5 +190,44 @@ test("signing copy and export preview stay within implemented capabilities", () 
     /\.imageElement\s*\{[\s\S]*?object-fit:\s*fill;/,
   );
   assert.match(exportSource, /const lineHeight = fontSize \* 1\.22;/);
-  assert.match(exportSource, /fonts\[element\.fontFamily \?\? "Helvetica"\]/);
+  assert.match(
+    exportSource,
+    /fonts\.prepareRuns\(element, element\.text\)/,
+  );
+  assert.match(editorSource, /fontFamily:\s*editorFontCss\(/);
+});
+
+test("Private Rewrite exposes local OCR, cancellation, and mobile-safe controls", () => {
+  assert.match(editorSource, /<PrivateRewriteControls/);
+  assert.match(editorSource, /removeOcrFragmentsOverlappingNative/);
+  assert.match(
+    editorSource,
+    /nativeTextPageKeysRef\.current\.has\(activeTextKey\)/,
+  );
+  assert.doesNotMatch(editorSource, /if \(activeTextPage\) return;/);
+  assert.match(
+    privateRewriteSource,
+    /aria-label="Private Rewrite local OCR"/,
+  );
+  assert.match(
+    privateRewriteSource,
+    /OCR runs only in this browser/,
+  );
+  assert.match(privateRewriteSource, />\s*Cancel\s*</);
+  assert.match(privateRewriteSource, /Recognition language/);
+  assert.match(localOcrSource, /import\("tesseract\.js"\)/);
+  assert.match(localOcrSource, /workerBlobURL:\s*false/);
+  assert.match(localOcrSource, /gzip:\s*false/);
+  assert.match(
+    privateRewriteCss,
+    /@media \(max-width: 760px\)[\s\S]*?min-height:\s*44px;/,
+  );
+  assert.match(
+    editorCss,
+    /@media \(pointer: coarse\)[\s\S]*?\.exportButton,[\s\S]*?min-height:\s*44px;[\s\S]*?\.iconButton\s*\{[\s\S]*?width:\s*44px;[\s\S]*?height:\s*44px;/,
+  );
+  assert.match(
+    privateRewriteCss,
+    /@media \(prefers-reduced-motion: reduce\)/,
+  );
 });

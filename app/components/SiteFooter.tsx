@@ -3,12 +3,13 @@ import { ArrowUpRight, Heart } from "lucide-react";
 import { TOOLS } from "../lib/tools";
 import styles from "./SiteFooter.module.css";
 
+const DEPLOYED_VERSION = "v0.4.0";
 const DEPLOYED_SOURCE_URL =
-  "https://github.com/inochisrl/pagelea.com/tree/v0.3.1";
+  `https://github.com/inochisrl/pagelea.com/tree/${DEPLOYED_VERSION}`;
 
 const RESOURCE_LINKS = [
   ["Free forever", "/pricing"],
-  ["Source for v0.3.1", DEPLOYED_SOURCE_URL],
+  [`Source for ${DEPLOYED_VERSION}`, DEPLOYED_SOURCE_URL],
   ["About Pagelea", "/about"],
   ["Help centre", "/help"],
   ["Security", "/security"],
@@ -88,7 +89,7 @@ export function SiteFooter() {
       <div className={`${styles.bottom} container`}>
         <span>© {new Date().getFullYear()} Inochi SRL</span>
         <span>
-          <a href={DEPLOYED_SOURCE_URL}>Source for v0.3.1</a>
+          <a href={DEPLOYED_SOURCE_URL}>Source for {DEPLOYED_VERSION}</a>
           {" · "}AGPL-3.0-or-later software. Pagelea is an Inochi SRL trademark.
         </span>
       </div>
