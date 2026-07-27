@@ -201,8 +201,9 @@ file will be inexpensive for the browser or third-party PDF parsers.
 For a compatible page, Pagelea identifies a unique source text-show operation,
 neutralizes its source string bytes in a copied content stream, replaces the
 page's content reference, removes obsolete unreferenced streams where safe,
-draws an opaque cleanup region, and writes the replacement as vector text.
-Unedited page text and graphics remain vector content.
+and writes the replacement as vector text without painting an opaque cleanup
+rectangle over the original background. Unedited page text and graphics remain
+vector content.
 
 The conservative parser and decoder enforce:
 
@@ -220,6 +221,16 @@ The conservative parser and decoder enforce:
 The vector path rejects inline images, marked-content operators, Form XObjects,
 live annotations, ambiguous text matches, unsupported font encodings, malformed
 syntax, unsupported filters, decompression over-budget, and any parsing error.
+It also requires every page font to be an unembedded, unremapped WinAnsi
+Helvetica, Times, or Courier variant and rejects every unverified text-show
+operation. This prevents a custom-font or invisible searchable copy from
+surviving while a separately decodable visible operation is replaced. Only
+directly decoded printable-ASCII `Tj` strings are eligible: non-printable
+WinAnsi bytes, positioned `TJ` arrays, quote operators, and multi-operation
+text blocks fail closed. Every eligible `Tj` also requires a local `Tf`
+selection that resolves to a verified page font; `ExtGState` font replacement
+is rejected. A bounded page-wide normalized sequence check also rejects a
+duplicate split across otherwise valid standard-font text-show operators.
 Marked content is rejected as a class so escaped `/ActualText` names or external
 marked-content properties cannot leave an alternative copy of the replaced text
 behind.
@@ -317,7 +328,7 @@ The current checks produced:
 | --- | --- |
 | Clean install on Node 22.13.0 / npm 11.17.0 | Passed; dependency patch reapplied |
 | Production-only `npm ci --omit=dev` | Passed; dependency patch reapplied and 7 focused runtime tests passed |
-| Full production build and test suite | 206 passed, 0 failed |
+| Full production build and test suite | 212 passed, 0 failed |
 | TypeScript and ESLint | Passed |
 | `npm audit --audit-level=low` | 0 vulnerabilities |
 | `npm audit --omit=dev --audit-level=low` | 0 vulnerabilities |
@@ -335,6 +346,13 @@ dependency or blob is safe. The 0.4.0 release must publish the SBOM and
 checksums produced from the exact public commit and must enable repository
 secret scanning, push protection, private vulnerability reporting, branch
 protection, and required CI checks.
+
+The repository currently has one eligible maintainer. CODEOWNER approval is
+therefore temporarily waived because GitHub does not permit self-approval.
+Pull requests, required quality/production-install/CodeQL checks, conversation
+resolution, linear history, administrator enforcement, and force-push/deletion
+protection remain mandatory. Enable CODEOWNER review when a second eligible
+maintainer is available.
 
 Licence metadata allowlisting is an engineering gate, not a legal conclusion.
 AGPL source-offer, notices, bundled third-party licences, contributor authority,

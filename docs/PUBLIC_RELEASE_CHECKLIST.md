@@ -121,7 +121,11 @@ git diff --check
 - [ ] Protect `main`: require pull requests, required quality and CodeQL checks,
       conversation resolution, and no force pushes or deletions.
 - [ ] Require CODEOWNER review for licensing, governance, security, and release
-      boundaries.
+      boundaries whenever two eligible maintainers can review each other.
+      A single-maintainer repository may record a temporary waiver because
+      GitHub does not allow self-approval; required PR, CI, conversation, and
+      no-force-push gates must remain enforced until a second maintainer is
+      available.
 - [ ] Limit workflow permissions to read by default and approve exceptions
       explicitly.
 - [ ] Verify issue forms, pull-request template, security contact link, labels,

@@ -1770,6 +1770,7 @@ export default function PdfEditorWorkspace({
     }
 
     exportAbortRef.current?.abort();
+    exportAbortRef.current = null;
     loadAbortRef.current?.abort();
     const loadController = new AbortController();
     loadAbortRef.current = loadController;

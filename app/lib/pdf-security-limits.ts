@@ -139,6 +139,7 @@ export type PdfSecurityLimitIssue =
         | "editor-image-pixels-too-large"
         | "too-many-editor-raster-pages"
         | "editor-raster-pixels-too-large"
+        | "editor-raster-fidelity-too-low"
         | "editor-raster-bytes-too-large"
         | "pdf-object-graph-too-deep"
         | "pdf-object-graph-too-large";
@@ -660,9 +661,10 @@ export function getEditorRasterMinimumScaleLimitIssue(
     minimumPixels > pagePixelBudget
   ) {
     return {
-      code: "editor-raster-pixels-too-large",
-      maximum:
-        PDF_SECURITY_LIMITS.maxEditorRasterCanvasPixelsTotal,
+      code: "editor-raster-fidelity-too-low",
+      maximum: Math.round(
+        PDF_SECURITY_LIMITS.editorRasterMinimumScale * 72,
+      ),
     };
   }
 
@@ -755,6 +757,8 @@ export function describePdfSecurityLimitIssue(
       return `The export needs to flatten more than ${issue.maximum} pages. Split the document and try again.`;
     case "editor-raster-pixels-too-large":
       return `Flattened pages exceed the combined ${Math.round(issue.maximum / 1_000_000)}-megapixel export budget. Split the document and try again.`;
+    case "editor-raster-fidelity-too-low":
+      return `A flattened page cannot stay at the ${issue.maximum} DPI minimum within the local export budget. Split the document and try again.`;
     case "editor-raster-bytes-too-large":
       return `Flattened pages exceed the ${formatLimitBytes(issue.maximum)} encoded-image export budget. Split the document and try again.`;
     case "text-field-too-long":

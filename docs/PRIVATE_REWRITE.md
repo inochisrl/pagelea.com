@@ -103,8 +103,14 @@ OCR lines often contain only a weak font-family hint.
   affected source page and draws searchable replacement text over the clean
   page image. The old scan pixels are not retained beneath the replacement.
 - Ambiguous content streams, nested forms, annotations, unsupported
-  encodings, and other uncertain native structures use Pagelea's bounded
-  flattened fallback.
+  encodings, custom or embedded source fonts, and other uncertain native
+  structures use Pagelea's bounded flattened fallback. The vector path is
+  limited to verified WinAnsi variants of Helvetica, Times, and Courier and
+  requires a local verified `Tf` selection before directly decoded
+  printable-ASCII `Tj` strings. It rejects `ExtGState` font changes,
+  non-printable bytes, positioned `TJ` arrays, quote operators,
+  multi-operation text blocks, and duplicate semantic text sequences on the
+  page, including copies split across separate operators.
 - Replacement wrapping is word-aware and grapheme-safe. Text that cannot fit
   inside the selected box fails with an explicit overflow error.
 - Font assets are reused within one export. Supported faces are embedded as

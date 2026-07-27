@@ -146,11 +146,11 @@ interface PdfContentToken {
     | "scalar";
   start: number;
   stringTokens: PdfContentStringToken[];
+  name?: string;
   text?: string;
 }
 
 interface PdfTextShowOperation {
-  block: PdfTextBlock;
   stringTokens: PdfContentStringToken[];
   text: string | null;
 }
@@ -179,6 +179,21 @@ const MAX_VECTOR_TEXT_REWRITE_NESTING = 64;
 const MAX_VECTOR_TEXT_REWRITE_TEXT_BLOCKS = 10_000;
 const MAX_VECTOR_TEXT_REWRITE_SHOW_OPERATIONS = 25_000;
 const MAX_VECTOR_TEXT_REWRITE_OPERANDS = 4_096;
+const MAX_VECTOR_TEXT_REWRITE_SEARCH_WORK = 32 * 1024 * 1024;
+const VERIFIED_VECTOR_BASE_FONTS = new Set([
+  "Courier",
+  "Courier-Bold",
+  "Courier-BoldOblique",
+  "Courier-Oblique",
+  "Helvetica",
+  "Helvetica-Bold",
+  "Helvetica-BoldOblique",
+  "Helvetica-Oblique",
+  "Times-Bold",
+  "Times-BoldItalic",
+  "Times-Italic",
+  "Times-Roman",
+]);
 
 function clamp(value: number, minimum: number, maximum: number): number {
   if (!Number.isFinite(value)) return minimum;
@@ -264,51 +279,33 @@ function hexValue(value: number): number {
   return value - 0x61 + 10;
 }
 
-const WINDOWS_1252_EXTENDED = [
-  "\u20ac",
-  "\u0081",
-  "\u201a",
-  "\u0192",
-  "\u201e",
-  "\u2026",
-  "\u2020",
-  "\u2021",
-  "\u02c6",
-  "\u2030",
-  "\u0160",
-  "\u2039",
-  "\u0152",
-  "\u008d",
-  "\u017d",
-  "\u008f",
-  "\u0090",
-  "\u2018",
-  "\u2019",
-  "\u201c",
-  "\u201d",
-  "\u2022",
-  "\u2013",
-  "\u2014",
-  "\u02dc",
-  "\u2122",
-  "\u0161",
-  "\u203a",
-  "\u0153",
-  "\u009d",
-  "\u017e",
-  "\u0178",
-] as const;
-
-function decodeSingleBytePdfText(bytes: readonly number[]): string {
+function decodeSingleBytePdfText(
+  bytes: readonly number[],
+): string | null {
   let result = "";
   for (const value of bytes) {
-    if (value >= 0x80 && value <= 0x9f) {
-      result += WINDOWS_1252_EXTENDED[value - 0x80];
-    } else {
-      result += String.fromCharCode(value);
-    }
+    /*
+     * PDF.js applies font-specific substitutions and whitespace handling to
+     * non-printable/extended WinAnsi bytes. The local parser must never guess
+     * at those semantics when deciding which searchable glyphs to remove.
+     */
+    if (value < 0x20 || value > 0x7e) return null;
+    result += String.fromCharCode(value);
   }
   return result;
+}
+
+// PDF.js can suppress control/format bytes while combining text items.
+const VECTOR_IGNORABLE_TEXT_PATTERN = new RegExp(
+  "[\\s\\u0000-\\u001f\\u007f-\\u009f\\u00ad" +
+    "\\u200b-\\u200f\\u202a-\\u202e\\u2060-\\u206f\\ufeff]+",
+  "gu",
+);
+
+function normalizeVectorSearchText(value: string): string {
+  return value
+    .normalize("NFKC")
+    .replace(VECTOR_IGNORABLE_TEXT_PATTERN, "");
 }
 
 function skipPdfWhitespaceAndComments(
@@ -408,11 +405,13 @@ function readPdfLiteralString(
       depth -= 1;
       index += 1;
       if (depth === 0) {
+        const text = decodeSingleBytePdfText(decoded);
+        if (text === null) return null;
         const stringToken: PdfContentStringToken = {
           end: index,
           kind: "literal-string",
           start,
-          text: decodeSingleBytePdfText(decoded),
+          text,
         };
         return {
           ...stringToken,
@@ -465,11 +464,13 @@ function readPdfHexString(
     }
     decoded.push(highNibble << 4);
   }
+  const text = decodeSingleBytePdfText(decoded);
+  if (text === null) return null;
   const stringToken: PdfContentStringToken = {
     end: index + 1,
     kind: "hex-string",
     start,
-    text: decodeSingleBytePdfText(decoded),
+    text,
   };
   return {
     ...stringToken,
@@ -489,9 +490,14 @@ function readPdfName(
   ) {
     index += 1;
   }
+  let name = "";
+  for (let offset = start; offset < index; offset += 1) {
+    name += String.fromCharCode(bytes[offset]);
+  }
   return {
     end: index,
     kind: "name",
+    name,
     start,
     stringTokens: [],
   };
@@ -551,23 +557,16 @@ function readPdfCompositeToken(
   if (value === 0x2f) return readPdfName(bytes, start);
 
   if (value === 0x5b) {
-    const stringTokens: PdfContentStringToken[] = [];
-    let supported = true;
     let index = start + 1;
     while (index < bytes.length) {
       index = skipPdfWhitespaceAndComments(bytes, index);
       if (index >= bytes.length) return null;
       if (bytes[index] === 0x5d) {
-        const text =
-          supported && stringTokens.every((token) => token.text !== null)
-            ? stringTokens.map((token) => token.text).join("")
-            : undefined;
         return {
           end: index + 1,
           kind: "array",
           start,
-          stringTokens,
-          ...(text === undefined ? {} : { text }),
+          stringTokens: [],
         };
       }
       const item = readPdfCompositeToken(
@@ -578,20 +577,11 @@ function readPdfCompositeToken(
       );
       if (budget.exhausted) return null;
       if (item) {
-        if (
-          item.kind !== "hex-string" &&
-          item.kind !== "literal-string" &&
-          item.kind !== "number"
-        ) {
-          supported = false;
-        }
-        stringTokens.push(...item.stringTokens);
         index = item.end;
         continue;
       }
       const bare = readPdfBareToken(bytes, index);
       if (bare.end === index) return null;
-      supported = supported && isPdfNumber(bare.value);
       index = bare.end;
     }
     return null;
@@ -667,50 +657,33 @@ function readPdfCompositeToken(
 }
 
 function textShowOperation(
-  operator: string,
   operands: readonly PdfContentToken[],
-  block: PdfTextBlock,
 ): PdfTextShowOperation {
-  let operand: PdfContentToken | undefined;
-  if (operator === "Tj" || operator === "'") {
-    operand = operands.at(-1);
-    if (
-      operand?.kind !== "literal-string" &&
-      operand?.kind !== "hex-string"
-    ) {
-      operand = undefined;
-    }
-  } else if (operator === "TJ") {
-    operand = operands.at(-1);
-    if (operand?.kind !== "array") operand = undefined;
-  } else if (operator === '"') {
-    const maybeText = operands.at(-1);
-    const firstSpacing = operands.at(-3);
-    const secondSpacing = operands.at(-2);
-    if (
-      (maybeText?.kind === "literal-string" ||
-        maybeText?.kind === "hex-string") &&
-      firstSpacing?.kind === "number" &&
-      secondSpacing?.kind === "number"
-    ) {
-      operand = maybeText;
-    }
+  let operand = operands.at(-1);
+  if (
+    operand?.kind !== "literal-string" &&
+    operand?.kind !== "hex-string"
+  ) {
+    operand = undefined;
   }
 
   return {
-    block,
     stringTokens: operand?.stringTokens ?? [],
     text: operand?.text ?? null,
   };
 }
 
-function parsePdfContent(bytes: Uint8Array): ParsedPdfContent | null {
+function parsePdfContent(
+  bytes: Uint8Array,
+  verifiedFontResourceNames: ReadonlySet<string>,
+): ParsedPdfContent | null {
   const textBlocks: PdfTextBlock[] = [];
   const budget: PdfContentParseBudget = {
     exhausted: false,
     tokens: 0,
   };
   let currentBlock: PdfTextBlock | null = null;
+  let currentFontResourceName: string | null = null;
   let operands: PdfContentToken[] = [];
   let showOperationCount = 0;
   let index = 0;
@@ -772,30 +745,55 @@ function parsePdfContent(bytes: Uint8Array): ParsedPdfContent | null {
         return null;
       }
       currentBlock = { showOperations: [] };
+      currentFontResourceName = null;
       textBlocks.push(currentBlock);
     } else if (operator === "ET") {
       if (!currentBlock) return null;
       currentBlock = null;
-    } else if (
-      operator === "Tj" ||
-      operator === "TJ" ||
-      operator === "'" ||
-      operator === '"'
-    ) {
+      currentFontResourceName = null;
+    } else if (operator === "Tf") {
+      const fontName = operands.at(-2);
+      const fontSize = operands.at(-1);
       if (
         !currentBlock ||
+        operands.length !== 2 ||
+        fontName?.kind !== "name" ||
+        !fontName.name ||
+        !verifiedFontResourceNames.has(fontName.name) ||
+        fontSize?.kind !== "number"
+      ) {
+        return null;
+      }
+      currentFontResourceName = fontName.name;
+    } else if (operator === "Tj") {
+      if (
+        !currentBlock ||
+        currentFontResourceName === null ||
         showOperationCount >=
           MAX_VECTOR_TEXT_REWRITE_SHOW_OPERATIONS
       ) {
         return null;
       }
-      const operation = textShowOperation(
-        operator,
-        operands,
-        currentBlock,
-      );
+      const operation = textShowOperation(operands);
       currentBlock.showOperations.push(operation);
       showOperationCount += 1;
+    } else if (
+      operator === "TJ" ||
+      operator === "'" ||
+      operator === '"' ||
+      operator === "gs" ||
+      (currentBlock !== null &&
+        (operator === "q" || operator === "Q"))
+    ) {
+      /*
+       * PDF.js may synthesize whitespace from TJ positioning adjustments and
+       * from the quote operators' implicit line movement. ExtGState can also
+       * replace the active font, while a graphics-state restore inside a text
+       * object would require a complete state stack. Keep the vector path
+       * limited to a locally verified Tf and one directly decoded string per
+       * Tj operation.
+       */
+      return null;
     }
     operands = [];
   }
@@ -825,17 +823,13 @@ function concatenateByteArrays(
 ): Uint8Array {
   const total = arrays.reduce(
     (size, array) => size + array.byteLength,
-    Math.max(0, arrays.length - 1),
+    0,
   );
   const result = new Uint8Array(total);
   let offset = 0;
-  for (let index = 0; index < arrays.length; index += 1) {
-    result.set(arrays[index], offset);
-    offset += arrays[index].byteLength;
-    if (index < arrays.length - 1) {
-      result[offset] = 0x0a;
-      offset += 1;
-    }
+  for (const array of arrays) {
+    result.set(array, offset);
+    offset += array.byteLength;
   }
   return result;
 }
@@ -868,6 +862,63 @@ function sourcePageHasFormXObjects(page: PDFPage): boolean {
     }
   }
   return false;
+}
+
+function verifiedVectorFontResourceNames(
+  page: PDFPage,
+): Set<string> | null {
+  const resources = page.node.Resources();
+  if (!resources) return null;
+
+  let fonts: PDFDict | undefined;
+  try {
+    fonts = resources.lookupMaybe(PDFName.of("Font"), PDFDict);
+  } catch {
+    return null;
+  }
+  if (!fonts || fonts.entries().length === 0) return null;
+
+  const verifiedNames = new Set<string>();
+  for (const [fontResourceName, rawFont] of fonts.entries()) {
+    try {
+      const font = page.doc.context.lookup(rawFont);
+      if (!(font instanceof PDFDict)) return null;
+      const type = font.lookupMaybe(PDFName.of("Type"), PDFName);
+      const subtype = font.lookupMaybe(
+        PDFName.of("Subtype"),
+        PDFName,
+      );
+      const baseFont = font.lookupMaybe(
+        PDFName.of("BaseFont"),
+        PDFName,
+      );
+      const encoding = font.lookupMaybe(
+        PDFName.of("Encoding"),
+        PDFName,
+      );
+      if (
+        type?.decodeText() !== "Font" ||
+        subtype?.decodeText() !== "Type1" ||
+        !baseFont ||
+        !VERIFIED_VECTOR_BASE_FONTS.has(baseFont.decodeText()) ||
+        encoding?.decodeText() !== "WinAnsiEncoding" ||
+        font.has(PDFName.of("ToUnicode")) ||
+        font.has(PDFName.of("FontDescriptor")) ||
+        font.has(PDFName.of("DescendantFonts")) ||
+        font.has(PDFName.of("CharProcs")) ||
+        font.has(PDFName.of("FontFile")) ||
+        font.has(PDFName.of("FontFile2")) ||
+        font.has(PDFName.of("FontFile3"))
+      ) {
+        return null;
+      }
+      verifiedNames.add(fontResourceName.toString());
+    } catch {
+      return null;
+    }
+  }
+
+  return verifiedNames;
 }
 
 function rawContentStreamEncoding(
@@ -984,11 +1035,9 @@ function decodedPageContents(page: PDFPage): Uint8Array | null {
       return null;
     }
     try {
-      const separatorBytes = decoded.length > 0 ? 1 : 0;
       const remainingBytes =
         MAX_VECTOR_TEXT_REWRITE_CONTENT_BYTES -
-        combinedBytes -
-        separatorBytes;
+        combinedBytes;
       if (remainingBytes < 0) return null;
       const bytes =
         stream instanceof PDFRawStream
@@ -1000,7 +1049,7 @@ function decodedPageContents(page: PDFPage): Uint8Array | null {
             ? stream.getUnencodedContents()
             : null;
       if (!bytes) return null;
-      combinedBytes += separatorBytes + bytes.byteLength;
+      combinedBytes += bytes.byteLength;
       if (combinedBytes > MAX_VECTOR_TEXT_REWRITE_CONTENT_BYTES) {
         return null;
       }
@@ -1020,11 +1069,14 @@ function rewrittenSourcePageContents(
     return null;
   }
   if (sourcePageHasFormXObjects(sourcePage)) return null;
+  const verifiedFontNames =
+    verifiedVectorFontResourceNames(sourcePage);
+  if (!verifiedFontNames) return null;
   const contents = decodedPageContents(sourcePage);
   if (!contents?.byteLength) return null;
   let parsed: ParsedPdfContent | null;
   try {
-    parsed = parsePdfContent(contents);
+    parsed = parsePdfContent(contents, verifiedFontNames);
   } catch {
     return null;
   }
@@ -1034,9 +1086,31 @@ function rewrittenSourcePageContents(
     string,
     { count: number; operation: PdfTextShowOperation }
   >();
+  const orderedNormalizedText: string[] = [];
+  const normalizedRanges = new Map<
+    PdfTextShowOperation,
+    { end: number; start: number }
+  >();
+  let normalizedCharacterCount = 0;
   for (const block of parsed.textBlocks) {
+    if (block.showOperations.length > 1) return null;
     for (const operation of block.showOperations) {
-      if (operation.text === null) continue;
+      if (
+        operation.text === null ||
+        operation.stringTokens.length === 0
+      ) {
+        return null;
+      }
+      const normalizedText = normalizeVectorSearchText(
+        operation.text,
+      );
+      const range = {
+        start: normalizedCharacterCount,
+        end: normalizedCharacterCount + normalizedText.length,
+      };
+      normalizedRanges.set(operation, range);
+      orderedNormalizedText.push(normalizedText);
+      normalizedCharacterCount = range.end;
       const existing = operationsByText.get(operation.text);
       if (existing) {
         existing.count += 1;
@@ -1048,15 +1122,39 @@ function rewrittenSourcePageContents(
       }
     }
   }
+  if (
+    edits.length < 1 ||
+    normalizedCharacterCount >
+      Math.floor(
+        MAX_VECTOR_TEXT_REWRITE_SEARCH_WORK / edits.length,
+      )
+  ) {
+    return null;
+  }
+  const normalizedPageText = orderedNormalizedText.join("");
   const selected = new Set<PdfTextShowOperation>();
   for (const edit of edits) {
     const originalText = edit.sourceText?.originalText;
     if (!originalText) return null;
+    const normalizedOriginal = normalizeVectorSearchText(originalText);
     const match = operationsByText.get(originalText);
+    const normalizedRange = match
+      ? normalizedRanges.get(match.operation)
+      : undefined;
+    const firstNormalizedMatch = normalizedOriginal
+      ? normalizedPageText.indexOf(normalizedOriginal)
+      : -1;
     if (
+      !normalizedOriginal ||
       match?.count !== 1 ||
-      match.operation.block.showOperations.length !== 1 ||
-      match.operation.stringTokens.length === 0 ||
+      !normalizedRange ||
+      firstNormalizedMatch !== normalizedRange.start ||
+      firstNormalizedMatch + normalizedOriginal.length !==
+        normalizedRange.end ||
+      normalizedPageText.indexOf(
+        normalizedOriginal,
+        firstNormalizedMatch + 1,
+      ) !== -1 ||
       selected.has(match.operation)
     ) {
       return null;
@@ -2821,10 +2919,11 @@ function validatePages(
 /**
  * Exports the visual editor state without sending bytes outside the current
  * runtime. Source pages stay as their original vector PDF whenever an edited
- * text-show operation can be identified uniquely and neutralized. Ambiguous
- * content streams, OCR-backed edits, and pages with live annotations use the
- * explicit PDF.js raster fallback so original glyphs or scanned pixels are
- * never recoverable below a replacement.
+ * printable-ASCII `Tj` operation can be identified uniquely and neutralized.
+ * Ambiguous content streams, positioned/implicit text-show operators,
+ * OCR-backed edits, and pages with live annotations use the explicit PDF.js
+ * raster fallback so original glyphs or scanned pixels are never recoverable
+ * below a replacement.
  */
 export async function exportEditedPdf(
   input: ExportEditedPdfInput,
@@ -2981,7 +3080,10 @@ export async function exportEditedPdf(
           if (prospectivePageIssue) {
             throw securityLimitError(prospectivePageIssue);
           }
-          annotationPreview ??= await loadPdfPreview(input.sourceBytes);
+          annotationPreview ??= await loadPdfPreview(
+            input.sourceBytes,
+            { signal: input.signal },
+          );
           const raster = await rasterizeSourcePage(
             annotationPreview,
             model.sourcePageIndex,

@@ -229,7 +229,11 @@ The detailed implementation review is retained in
   combining marks, Indic scripts, Hangul, and emoji fail with an explicit
   error instead of silently producing malformed or unsearchable text.
 - Compatible text-show operators are neutralized in the original content
-  stream and replacements are drawn as searchable vector text. Ambiguous
+  stream and replacements are drawn as searchable vector text when every page
+  font is a verified WinAnsi Helvetica, Times, or Courier variant and the
+  source selects it locally with `Tf` before directly decoded
+  printable-ASCII `Tj` operations. Custom or embedded fonts, `ExtGState` text,
+  non-printable bytes, positioned `TJ` arrays, quote operators, ambiguous
   encodings, nested form content, annotations, or unsupported streams use a
   fail-closed raster fallback; that page can lose selection, accessibility
   structure, and vector fidelity.
