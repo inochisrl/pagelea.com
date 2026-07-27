@@ -5,7 +5,7 @@ lets a user recognize text in an image-only or mixed PDF page, select a
 recognized line, rewrite it, and export searchable replacement text without
 sending the document to Pagelea or an OCR provider.
 
-This document describes version 0.4.0. It is a support contract, not a claim
+This document describes version 0.4.1. It is a support contract, not a claim
 that arbitrary PDF content can be edited losslessly.
 
 ## Workflow
@@ -57,7 +57,7 @@ path-traversing assets. Licences are retained under
 | Per-page recognition | Supported |
 | Progress and cancellation | Supported |
 | Rotation, handwriting, tables, or arbitrary layouts | Best effort; verify manually |
-| Other recognition languages | Not included in version 0.4.0 |
+| Other recognition languages | Not included in version 0.4.1 |
 
 OCR accuracy depends on resolution, contrast, skew, rotation, typography, and
 layout. A recognized line is an editable geometry estimate, not proof of the
@@ -85,7 +85,7 @@ characters, fall back to an operating-system font, or convert unsupported text
 to an unsearchable image.
 
 Pure Arabic and Hebrew runs are positioned right-to-left and preserve exact
-text extraction within the supported matrix. Version 0.4.0 does not provide a
+text extraction within the supported matrix. Version 0.4.1 does not provide a
 general Unicode bidirectional-layout or complex-script shaping engine.
 
 Source-font correspondence is heuristic. Pagelea normalizes the font names
@@ -107,10 +107,14 @@ OCR lines often contain only a weak font-family hint.
   structures use Pagelea's bounded flattened fallback. The vector path is
   limited to verified WinAnsi variants of Helvetica, Times, and Courier and
   requires a local verified `Tf` selection before directly decoded
-  printable-ASCII `Tj` strings. It rejects `ExtGState` font changes,
-  non-printable bytes, positioned `TJ` arrays, quote operators,
-  multi-operation text blocks, and duplicate semantic text sequences on the
-  page, including copies split across separate operators.
+  printable-ASCII `Tj` strings with exactly one string operand. It rejects
+  unconsumed or nested string operands, `ExtGState` font changes, non-printable
+  bytes, positioned `TJ` arrays, quote operators, multi-operation text blocks,
+  and duplicate semantic text on the page. Pagelea also requires bounded
+  PDF.js text-layer evidence whose text and geometry match the immutable source,
+  rejects any unselected fragment overlapping an edited source rectangle, and
+  verifies that no copied page object or content-stream dictionary aliases the
+  old content streams.
 - Replacement wrapping is word-aware and grapheme-safe. Text that cannot fit
   inside the selected box fails with an explicit overflow error.
 - Font assets are reused within one export. Supported faces are embedded as
@@ -122,6 +126,11 @@ fallback, unrelated source text on the affected page becomes part of the page
 image and therefore loses its original selection and accessibility structure.
 Vector fidelity can also be reduced. Newly written replacement text remains
 searchable. Always retain the source PDF and review the downloaded result.
+
+Private Rewrite edits the visible/searchable text path; it is not certified
+forensic redaction. A source PDF can contain non-rendered copies in comments,
+metadata, resources, or unrelated objects. Use Sanitize & Flatten and
+independently inspect an export before relying on it to remove sensitive data.
 
 ## Resource limits
 

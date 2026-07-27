@@ -8,6 +8,37 @@ and this project follows
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-27
+
+### Security
+
+- Require bounded PDF.js text-layer evidence before any native vector rewrite,
+  including exact raw-operation correspondence and immutable, unrotated source
+  geometry. Missing or conflicting evidence forces the raster fallback.
+- Reject fragmented or case-variant duplicates even when their `Tj` operators
+  are reordered or interleaved with unrelated text.
+- Reject malformed `Tj` calls with extra operands and any string operand
+  consumed by an unreviewed operator, including strings nested in arrays or
+  dictionaries.
+- Verify that the old `/Contents` objects have no alias inside the copied page
+  graph; aliases through page keys or inherited resources now force the raster
+  fallback.
+- Limit vector-path content-stream dictionaries to reviewed `/Length` and
+  single-filter forms, so cyclic or nested aliases cannot preserve an obsolete
+  stream.
+- Copy multiple `/Contents` streams with the same byte-exact sequencing used
+  by PDF.js so operators split across stream boundaries cannot evade parsing.
+- Restrict copied vector pages to a reviewed page-dictionary allowlist; unknown
+  or active entries fail closed to the static raster path.
+- Bound page-object graph entries as well as unique containers, avoiding wide
+  graph expansion before the raster fallback.
+
+### Fixed
+
+- Prevented `v0.4.0` from retaining a complete or partial old text layer in
+  adversarial PDFs that interleave, change the case of, or alias source text.
+  Version 0.4.1 supersedes that deployed release.
+
 ## [0.4.0] - 2026-07-27
 
 ### Added

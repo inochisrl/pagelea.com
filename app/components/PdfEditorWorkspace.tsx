@@ -2907,11 +2907,37 @@ export default function PdfEditorWorkspace({
       const { exportEditedPdf } = await import(
         "../lib/pdf-editor-export"
       );
+      const nativeTextEvidence = currentSnapshot.pages.flatMap(
+        (page) => {
+          if (page.sourcePageIndex === null) return [];
+          const pageKey = `${page.id}:${normalizedQuarterTurn(
+            page.sourceRotation + page.rotation,
+          )}`;
+          const textPage = textPagesRef.current[pageKey];
+          if (!textPage) return [];
+          const display = pageDisplaySize(page);
+          return [
+            {
+              pageId: page.id,
+              sourcePageIndex: page.sourcePageIndex,
+              fragments: textPage.fragments
+                .filter((fragment) => fragment.origin === "native")
+                .map((fragment) => ({
+                  id: fragment.id,
+                  text: fragment.text,
+                  ...textFragmentGeometry(fragment, display),
+                  hasGeometry: fragment.hasGeometry,
+                })),
+            },
+          ];
+        },
+      );
       const result = await exportEditedPdf({
         sourceBytes,
         pages: currentSnapshot.pages,
         elements: currentSnapshot.elements,
         filename: documentName,
+        nativeTextEvidence,
         onProgress: (value, label) => {
           if (exportAbortRef.current === exportController) {
             setProgress({ value, label });

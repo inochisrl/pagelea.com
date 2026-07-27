@@ -4,7 +4,7 @@ import test from "node:test";
 import { URL } from "node:url";
 
 import { build } from "esbuild";
-import { PDFDocument, PDFName } from "pdf-lib";
+import { PDFArray, PDFDocument, PDFName } from "pdf-lib";
 
 const exportSourceUrl = new URL(
   "../app/lib/pdf-editor-export.ts",
@@ -68,6 +68,85 @@ async function createDeepPageGraphFixture(depth = 6_000) {
     );
   }
   page.node.set(PDFName.of("DeepCarrier"), child);
+  return document.save({ useObjectStreams: true });
+}
+
+async function createWidePageGraphFixture(width = 100_001) {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  const page = document.addPage([100, 100]);
+  const resources =
+    page.node.Resources() ?? document.context.obj({});
+  page.node.set(PDFName.of("Resources"), resources);
+  const values = PDFArray.withContext(document.context);
+  const scalar = PDFName.of("Scalar");
+  for (let index = 0; index < width; index += 1) {
+    values.push(scalar);
+  }
+  resources.set(PDFName.of("Wide"), values);
+  return document.save({ useObjectStreams: true });
+}
+
+async function createDeepPageReferenceChainFixture(depth = 512) {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  const page = document.addPage([100, 100]);
+  let child = document.context.register(
+    document.context.obj({ Leaf: true }),
+  );
+  for (let index = 0; index < depth; index += 1) {
+    child = document.context.register(child);
+  }
+  page.node.set(PDFName.of("ArtBox"), child);
+  return document.save({ useObjectStreams: true });
+}
+
+async function createAlternatingReferenceGraphFixture(
+  groups = 4,
+  referencesPerGroup = 100,
+) {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  const page = document.addPage([100, 100]);
+  let child = document.context.obj({ Leaf: true });
+  for (let group = 0; group < groups; group += 1) {
+    let reference = document.context.register(child);
+    for (
+      let index = 1;
+      index < referencesPerGroup;
+      index += 1
+    ) {
+      reference = document.context.register(reference);
+    }
+    child = document.context.obj({ Child: reference });
+  }
+  page.node.set(
+    PDFName.of("ArtBox"),
+    document.context.register(child),
+  );
+  return document.save({ useObjectStreams: true });
+}
+
+async function createContainerAndScalarReferenceFixture(
+  containerDepth = 200,
+  referenceDepth = 100,
+) {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  const page = document.addPage([100, 100]);
+  let child = document.context.register(PDFName.of("Leaf"));
+  for (let index = 1; index < referenceDepth; index += 1) {
+    child = document.context.register(child);
+  }
+  let carrier = document.context.obj({ Child: child });
+  for (let index = 1; index < containerDepth; index += 1) {
+    carrier = document.context.obj({ Child: carrier });
+  }
+  page.node.set(PDFName.of("ArtBox"), carrier);
   return document.save({ useObjectStreams: true });
 }
 
@@ -179,6 +258,7 @@ for (const pageKey of [
   "PresSteps",
   "Thumb",
   "Trans",
+  "UnreviewedCustom",
 ]) {
   test(`editor export flattens source pages carrying /${pageKey}`, async () => {
     await assert.rejects(
@@ -247,6 +327,112 @@ test(
         ],
         elements: [],
         filename: "deep-resource.pdf",
+      }),
+      { name: "PdfSecurityLimitError" },
+    );
+  },
+);
+
+test(
+  "editor export bounds wide page-object graphs without spread expansion",
+  { timeout: 15_000 },
+  async () => {
+    await assert.rejects(
+      editorExport.exportEditedPdf({
+        sourceBytes: await createWidePageGraphFixture(),
+        pages: [
+          {
+            ...blankPage,
+            sourcePageIndex: 0,
+            sourceWidth: 100,
+            sourceHeight: 100,
+          },
+        ],
+        elements: [],
+        filename: "wide-resource.pdf",
+      }),
+      (error) =>
+        error instanceof Error &&
+        error.name === "PdfSecurityLimitError" &&
+        /object graph.*limit/i.test(error.message) &&
+        !/call stack|rangeerror/i.test(error.message),
+    );
+  },
+);
+
+test(
+  "editor export rejects deep reference chains before copyPages recursion",
+  { timeout: 15_000 },
+  async () => {
+    await assert.rejects(
+      editorExport.exportEditedPdf({
+        sourceBytes: await createDeepPageReferenceChainFixture(),
+        pages: [
+          {
+            ...blankPage,
+            sourcePageIndex: 0,
+            sourceWidth: 100,
+            sourceHeight: 100,
+          },
+        ],
+        elements: [],
+        filename: "deep-reference-chain.pdf",
+      }),
+      (error) =>
+        error instanceof Error &&
+        error.name === "PdfSecurityLimitError" &&
+        /object graph.*limit/i.test(error.message) &&
+        !/call stack|rangeerror/i.test(error.message),
+    );
+  },
+);
+
+test(
+  "editor export counts cumulative reference and container depth",
+  { timeout: 15_000 },
+  async () => {
+    await assert.rejects(
+      editorExport.exportEditedPdf({
+        sourceBytes:
+          await createAlternatingReferenceGraphFixture(),
+        pages: [
+          {
+            ...blankPage,
+            sourcePageIndex: 0,
+            sourceWidth: 100,
+            sourceHeight: 100,
+          },
+        ],
+        elements: [],
+        filename: "alternating-reference-graph.pdf",
+      }),
+      (error) =>
+        error instanceof Error &&
+        error.name === "PdfSecurityLimitError" &&
+        /object graph.*limit/i.test(error.message) &&
+        !/call stack|rangeerror/i.test(error.message),
+    );
+  },
+);
+
+test(
+  "editor export counts scalar reference chains after nested containers",
+  { timeout: 15_000 },
+  async () => {
+    await assert.rejects(
+      editorExport.exportEditedPdf({
+        sourceBytes:
+          await createContainerAndScalarReferenceFixture(),
+        pages: [
+          {
+            ...blankPage,
+            sourcePageIndex: 0,
+            sourceWidth: 100,
+            sourceHeight: 100,
+          },
+        ],
+        elements: [],
+        filename: "container-scalar-reference-graph.pdf",
       }),
       { name: "PdfSecurityLimitError" },
     );
