@@ -54,6 +54,7 @@ import {
 import {
   describePdfSecurityLimitIssue,
   getEditorRasterBudgetLimitIssue,
+  getEditorRasterMinimumScaleLimitIssue,
   getEditorSnapshotLimitIssue,
   getFileLimitIssue,
   getImageDimensionLimitIssue,
@@ -2600,6 +2601,15 @@ async function rasterizeSourcePage(
       PDF_SECURITY_LIMITS.maxEditorRasterCanvasPixels,
       canvasPixelBudget,
     );
+    const minimumScaleIssue =
+      getEditorRasterMinimumScaleLimitIssue(
+        logicalViewport.width,
+        logicalViewport.height,
+        canvasPixelBudget,
+      );
+    if (minimumScaleIssue) {
+      throw securityLimitError(minimumScaleIssue);
+    }
     const limitedScale = Math.min(
       PDF_SECURITY_LIMITS.editorRasterTargetScale,
       PDF_SECURITY_LIMITS.maxEditorRasterCanvasDimension /
@@ -2611,7 +2621,11 @@ async function rasterizeSourcePage(
           Math.max(1, logicalCanvasArea),
       ),
     );
-    if (!Number.isFinite(limitedScale) || limitedScale <= 0) {
+    if (
+      !Number.isFinite(limitedScale) ||
+      limitedScale <
+        PDF_SECURITY_LIMITS.editorRasterMinimumScale
+    ) {
       throw securityLimitError({
         code: "editor-raster-pixels-too-large",
         maximum:
@@ -2650,7 +2664,11 @@ async function rasterizeSourcePage(
           canvasHeight,
         Math.sqrt(pagePixelBudget / Math.max(1, canvasPixels)),
       );
-      renderScale *= Math.max(Number.EPSILON, reduction * 0.999);
+      renderScale = Math.max(
+        PDF_SECURITY_LIMITS.editorRasterMinimumScale,
+        renderScale *
+          Math.max(Number.EPSILON, reduction * 0.999),
+      );
       renderViewport = pdfPage.getViewport({
         rotation,
         scale: renderScale,

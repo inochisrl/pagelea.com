@@ -308,7 +308,7 @@ test("bounds all resource-bearing editor element types", () => {
   );
 });
 
-test("bounds aggregate raster pages, pixels, and encoded bytes", () => {
+test("bounds raster volume without silently dropping below 72 DPI", () => {
   const policy = limits.PDF_SECURITY_LIMITS;
   const withinBudget = {
     pageCount: policy.maxEditorRasterPages,
@@ -350,6 +350,32 @@ test("bounds aggregate raster pages, pixels, and encoded bytes", () => {
     {
       code: "editor-raster-bytes-too-large",
       maximum: policy.maxEditorRasterEncodedBytesTotal,
+    },
+  );
+
+  const letterWidth = 612;
+  const letterHeight = 792;
+  const minimumPixels =
+    Math.ceil(letterWidth * policy.editorRasterMinimumScale) *
+    Math.ceil(letterHeight * policy.editorRasterMinimumScale);
+  assert.equal(policy.editorRasterMinimumScale, 1);
+  assert.equal(
+    limits.getEditorRasterMinimumScaleLimitIssue(
+      letterWidth,
+      letterHeight,
+      minimumPixels,
+    ),
+    null,
+  );
+  assert.deepEqual(
+    limits.getEditorRasterMinimumScaleLimitIssue(
+      letterWidth,
+      letterHeight,
+      minimumPixels - 1,
+    ),
+    {
+      code: "editor-raster-pixels-too-large",
+      maximum: policy.maxEditorRasterCanvasPixelsTotal,
     },
   );
 });

@@ -235,8 +235,9 @@ fallback does not upload the page, but it can reduce searchability,
 accessibility, zoom fidelity, and print fidelity for unaffected content on that
 page. Rasterization is capped at 16 million pixels per page, 100 pages and
 80 million pixels per export, plus 128 MB of encoded page images. Scale is
-reduced against the remaining aggregate pixel budget, and exhausted
-page/image budgets fail closed.
+reduced against the remaining aggregate pixel budget but never below 72 DPI;
+insufficient fidelity or exhausted page/image budgets fail closed with an
+instruction to split the document.
 
 Existing-text replacement is an editing feature, not a certified secure
 redaction workflow. Users must not rely on it as the sole control for regulated
