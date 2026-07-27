@@ -1,14 +1,14 @@
-# Pagelea 0.4.0 Security and Release Review
+# Pagelea 0.4.1 Security and Release Review
 
 - **Review date:** 2026-07-27
 - **Owner:** Inochi SRL
-- **Target:** Pagelea Community 0.4.0
+- **Target:** Pagelea Community 0.4.1
 - **Licence:** AGPL-3.0-or-later
 - **Scope:** the current release-candidate source tree
 
 ## Executive summary
 
-Pagelea 0.4.0 is a free and open-source, browser-based PDF workbench. Its
+Pagelea 0.4.1 is a free and open-source, browser-based PDF workbench. Its
 published document workflows process selected files in the user's browser.
 The application has no document-upload endpoint, cloud document library,
 consumer account API, checkout, subscription, entitlement, payment webhook, or
@@ -29,7 +29,7 @@ fallback.
 The repository is already public. Its reachable history contains a retired
 `MEMORY.md` file in nine older commits; the file is absent from the current
 tree, remains ignored, and the complete reachable-history scan found no secret.
-A history rewrite cannot retract that prior exposure and is **not** a 0.4.0
+A history rewrite cannot retract that prior exposure and is **not** a 0.4.1
 release prerequisite. It remains separately tracked governance debt: any future
 rewrite requires explicit owner approval and a verified, access-controlled
 backup before public refs are changed.
@@ -67,10 +67,11 @@ The review covered:
 - dependency advisories, source leakage, GitHub Actions, CodeQL, Dependabot,
   SBOM generation, and public-history requirements.
 
-### Private Rewrite 0.4.0 review delta
+### Private Rewrite 0.4.1 review delta
 
-Version 0.4.0 adds local English/Italian OCR, reviewed Unicode export fonts,
-and font matching. The review additionally covered:
+Version 0.4.1 retains the local English/Italian OCR, reviewed Unicode export
+fonts, and font matching introduced in 0.4.0, and closes several fail-closed
+validation gaps found after that release. The review additionally covered:
 
 - fixed same-origin Tesseract worker, WebAssembly, language-model, and font
   paths with `workerBlobURL: false` and no document-upload fallback;
@@ -87,6 +88,15 @@ and font matching. The review additionally covered:
 - fail-closed flattening for annotations, page additional actions, associated
   files, presentation actions, thumbnails, metadata, article beads, and other
   reviewed non-visual page payload entries before any vector page copy;
+- complete bounded PDF.js text-layer evidence, immutable selected-fragment
+  matching, and geometric overlap rejection before a vector rewrite;
+- conservative case-folded duplicate-text detection across operation and
+  fragment boundaries, plus alias checks for old content streams throughout
+  the copied page graph;
+- a reviewed allowlist for copied page-dictionary keys and byte-exact
+  concatenation of multiple content streams;
+- exact one-string `Tj` operand validation, rejection of unconsumed nested
+  strings, and reviewed content-stream dictionary forms that exclude cycles;
 - the narrow `wasm-unsafe-eval` CSP capability required by the pinned local
   Tesseract core, without adding general `unsafe-eval` or remote script
   origins.
@@ -225,15 +235,26 @@ It also requires every page font to be an unembedded, unremapped WinAnsi
 Helvetica, Times, or Courier variant and rejects every unverified text-show
 operation. This prevents a custom-font or invisible searchable copy from
 surviving while a separately decodable visible operation is replaced. Only
-directly decoded printable-ASCII `Tj` strings are eligible: non-printable
-WinAnsi bytes, positioned `TJ` arrays, quote operators, and multi-operation
-text blocks fail closed. Every eligible `Tj` also requires a local `Tf`
-selection that resolves to a verified page font; `ExtGState` font replacement
-is rejected. A bounded page-wide normalized sequence check also rejects a
-duplicate split across otherwise valid standard-font text-show operators.
-Marked content is rejected as a class so escaped `/ActualText` names or external
-marked-content properties cannot leave an alternative copy of the replaced text
-behind.
+directly decoded printable-ASCII `Tj` strings with exactly one string operand
+are eligible: extra or unconsumed string operands, non-printable WinAnsi bytes,
+positioned `TJ` arrays, quote operators, and multi-operation text blocks fail
+closed. Nested strings are tracked through arrays and dictionaries so an
+unreviewed operator cannot leave source text recoverable. Every eligible `Tj`
+also requires a local `Tf` selection that resolves to a verified page font;
+`ExtGState` font replacement is rejected. A vector rewrite additionally
+requires complete, bounded PDF.js text-layer evidence for the page. Selected
+evidence text and geometry must match the immutable source fragment, and every
+other searchable fragment must have valid geometry and remain outside the
+edited source rectangle. A bounded, case-folded sequence check rejects an
+equivalent duplicate aligned to text-operation or PDF.js-fragment boundaries,
+including duplicates split across adjacent operations. Old `/Contents`
+objects must not remain reachable through aliases in the copied page graph;
+aliases through copied page objects, inherited resources, or unreviewed
+content-stream dictionaries force the raster path. Content shared with
+another copied page remains live for that page and is not deleted. Marked
+content is rejected as a class so escaped `/ActualText` names or external
+marked-content properties cannot leave an alternative copy of the replaced
+text behind.
 
 Flate decoding uses streaming `pako` output with a hard decoded-byte ceiling.
 The decoder stops when the remaining page budget would be exceeded rather than
@@ -252,7 +273,9 @@ instruction to split the document.
 
 Existing-text replacement is an editing feature, not a certified secure
 redaction workflow. Users must not rely on it as the sole control for regulated
-redaction without independent inspection of the exported file.
+redaction without independent inspection of the exported file. Non-rendered
+copies in comments, metadata, resources, or unrelated objects can remain
+outside the visible/searchable text path.
 
 ### Sanitize & Flatten
 
@@ -328,13 +351,13 @@ The current checks produced:
 | --- | --- |
 | Clean install on Node 22.13.0 / npm 11.17.0 | Passed; dependency patch reapplied |
 | Production-only `npm ci --omit=dev` | Passed; dependency patch reapplied and 7 focused runtime tests passed |
-| Full production build and test suite | 213 passed, 0 failed |
+| Full production build and test suite | 238 passed, 0 failed |
 | TypeScript and ESLint | Passed |
 | `npm audit --audit-level=low` | 0 vulnerabilities |
 | `npm audit --omit=dev --audit-level=low` | 0 vulnerabilities |
 | Dependency licence metadata | 388 packages reviewed |
 | Private Rewrite assets and retained licences | 27 assets, 4 worker-bundle components, and 9 licences verified |
-| Deterministic CycloneDX SBOM | Passed; root is Pagelea 0.4.0 / AGPL-3.0-or-later |
+| Deterministic CycloneDX SBOM | Passed; root is Pagelea 0.4.1 / AGPL-3.0-or-later |
 | Real Chromium OCR/edit/export smoke test | Passed; worker, WASM, `eng`, `ita`, and export font served same-origin with HTTP 200; no console or failed-response finding |
 | Export inspection | OCR replacement removed the old searchable text; Unicode LGC/Japanese/Hebrew/Arabic output rendered and extracted correctly |
 | `git diff --check` | Passed |
@@ -342,10 +365,16 @@ The current checks produced:
 | Historical D1 migration split and SQLite integrity exercise | Passed |
 
 An advisory or secret scan is point-in-time evidence, not proof that every
-dependency or blob is safe. The 0.4.0 release must publish the SBOM and
-checksums produced from the exact public commit and must enable repository
+dependency or blob is safe. The 0.4.1 release must publish the Linux CI SBOM
+and checksums produced from the exact public commit and must enable repository
 secret scanning, push protection, private vulnerability reporting, branch
 protection, and required CI checks.
+
+The immutable 0.4.0 release attached a dependency SBOM generated on macOS
+rather than the different Linux SBOM emitted by its final main-branch CI run.
+Version 0.4.1 therefore accepts only the downloaded artifact from the final
+Linux CI run, records its SHA-256 in release provenance, and publishes that
+exact file.
 
 The repository currently has one eligible maintainer. CODEOWNER approval is
 therefore temporarily waived because GitHub does not permit self-approval.
@@ -364,7 +393,7 @@ The already-public history contains a retired maintainer-memory file in nine
 older commits. It is absent from the current tree, remains ignored, and the
 complete reachable history scan found no secret. Rewriting a repository that
 is already public cannot retract prior exposure and would invalidate existing
-clones, tags, and source links, so it is not a 0.4.0 release prerequisite.
+clones, tags, and source links, so it is not a 0.4.1 release prerequisite.
 
 This remains governance debt. Any future history rewrite requires a verified
 access-controlled backup, independent review of every ref and release artifact,
@@ -428,7 +457,7 @@ independently verified scheduled job.
 
 ## Release decision
 
-Pagelea Community 0.4.0 is suitable for a public free/open-source beta only
+Pagelea Community 0.4.1 is suitable for a public free/open-source beta only
 after all of the following are true for the exact release commit:
 
 - the current CI build, tests, audits, CodeQL, and SBOM checks pass;
@@ -445,5 +474,5 @@ Subject to those operational gates, the reviewed tree has no known P0 or P1
 code blocker. This approval does not expand the API surface, authorize document
 uploads, certify secure redaction, or authorize a future history rewrite. The
 already-public maintainer-memory file remains documented governance debt, not a
-0.4.0 release prerequisite. Version 0.4.0 contains no D1 schema migration; the
+0.4.1 release prerequisite. Version 0.4.1 contains no D1 schema migration; the
 historical destructive migration and its recovery requirements are unchanged.

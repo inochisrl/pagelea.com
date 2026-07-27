@@ -33,7 +33,7 @@ const bundledExport = await build({
   write: false,
   logLevel: "silent",
 });
-const editorExport = await import(
+const rawEditorExport = await import(
   `data:text/javascript;base64,${Buffer.from(
     bundledExport.outputFiles[0].contents,
   ).toString("base64")}`,
@@ -81,6 +81,58 @@ function replacementElement(originalText, text = "Replacement text") {
     },
   };
 }
+
+function nativeTextEvidence(originalText, extraFragments = []) {
+  return [
+    {
+      pageId: pageModel.id,
+      sourcePageIndex: 0,
+      fragments: [
+        {
+          id: "source-text-1",
+          text: originalText,
+          x: 0.095,
+          y: 0.425,
+          width: 0.4,
+          height: 0.1,
+          rotation: 0,
+          hasGeometry: true,
+        },
+        ...extraFragments.map((fragment, index) => ({
+          id: `evidence-${index + 1}`,
+          x: 0.1,
+          y: 0.1,
+          width: 0.3,
+          height: 0.06,
+          rotation: 0,
+          hasGeometry: true,
+          ...fragment,
+        })),
+      ],
+    },
+  ];
+}
+
+function exportWithNativeTextEvidence(input, extraFragments = []) {
+  const sourceEdit = input.elements.find(
+    (element) => element.type === "text" && element.sourceText,
+  );
+  return rawEditorExport.exportEditedPdf({
+    ...input,
+    nativeTextEvidence:
+      input.nativeTextEvidence ??
+      (sourceEdit
+        ? nativeTextEvidence(
+            sourceEdit.sourceText.originalText,
+            extraFragments,
+          )
+        : []),
+  });
+}
+
+const editorExport = {
+  exportEditedPdf: exportWithNativeTextEvidence,
+};
 
 async function sourcePdf(
   textRuns,
@@ -197,6 +249,9 @@ test("existing-text export preserves unedited vectors and removes the old search
     pages: [pageModel],
     elements: [replacementElement("Original secret")],
     filename: "edited.pdf",
+    nativeTextEvidence: nativeTextEvidence("Original secret", [
+      { text: "Keep searchable" },
+    ]),
   });
   const outputBytes = new Uint8Array(await result.blob.arrayBuffer());
   const items = await extractedTextItems(outputBytes);
@@ -238,6 +293,110 @@ test("existing-text export preserves unedited vectors and removes the old search
     0,
     "the compatible page must not be replaced by a raster image",
   );
+});
+
+test("native vector rewriting handles two selected source fragments together", async () => {
+  const sourceBytes = await sourcePdf([
+    { text: "Keep searchable", x: 30, y: 160 },
+    { text: "First secret", x: 30, y: 110 },
+    { text: "Second secret", x: 30, y: 60 },
+  ]);
+  const first = replacementElement(
+    "First secret",
+    "First replacement",
+  );
+  const second = replacementElement(
+    "Second secret",
+    "Second replacement",
+  );
+  second.id = "replacement-2";
+  second.y = 0.68;
+  second.sourceText = {
+    ...second.sourceText,
+    id: "source-text-2",
+    originalY: 0.675,
+  };
+  const evidence = nativeTextEvidence("First secret", [
+    {
+      id: "source-text-2",
+      text: "Second secret",
+      x: 0.095,
+      y: 0.675,
+      width: 0.4,
+      height: 0.1,
+    },
+    {
+      id: "keep-text",
+      text: "Keep searchable",
+      x: 0.095,
+      y: 0.15,
+      width: 0.4,
+      height: 0.1,
+    },
+  ]);
+
+  const result = await editorExport.exportEditedPdf({
+    sourceBytes,
+    pages: [pageModel],
+    elements: [first, second],
+    filename: "two-native-replacements.pdf",
+    nativeTextEvidence: evidence,
+  });
+  const outputBytes = new Uint8Array(await result.blob.arrayBuffer());
+  const strings = (await extractedTextItems(outputBytes)).map(
+    (item) => item.str,
+  );
+
+  assert.deepEqual(strings, [
+    "Keep searchable",
+    "First replacement",
+    "Second replacement",
+  ]);
+  const output = await PDFDocument.load(outputBytes, {
+    updateMetadata: false,
+  });
+  const xObjects = output
+    .getPage(0)
+    .node.Resources()
+    ?.lookupMaybe(PDFName.of("XObject"), PDFDict);
+  assert.equal(
+    xObjects?.entries().length ?? 0,
+    0,
+    "multiple proven native edits must retain the vector page",
+  );
+});
+
+test("a containing word elsewhere does not force native raster fallback", async () => {
+  const sourceBytes = await sourcePdf([
+    { text: "Subtotal", x: 30, y: 150 },
+    { text: "Total", x: 30, y: 100 },
+  ]);
+  const result = await editorExport.exportEditedPdf({
+    sourceBytes,
+    pages: [pageModel],
+    elements: [replacementElement("Total", "Paid")],
+    filename: "containing-word.pdf",
+    nativeTextEvidence: nativeTextEvidence("Total", [
+      {
+        text: "Subtotal",
+        x: 0.1,
+        y: 0.15,
+      },
+    ]),
+  });
+  const outputBytes = new Uint8Array(await result.blob.arrayBuffer());
+  assert.deepEqual(
+    (await extractedTextItems(outputBytes)).map((item) => item.str),
+    ["Subtotal", "Paid"],
+  );
+  const output = await PDFDocument.load(outputBytes, {
+    updateMetadata: false,
+  });
+  const xObjects = output
+    .getPage(0)
+    .node.Resources()
+    ?.lookupMaybe(PDFName.of("XObject"), PDFDict);
+  assert.equal(xObjects?.entries().length ?? 0, 0);
 });
 
 test("native vector replacement does not paint over non-uniform backgrounds", async () => {
@@ -354,6 +513,98 @@ test("ambiguous source text takes the explicit browser raster fallback", async (
     /PDF previews can only be loaded in the browser/i,
   );
 });
+
+test("native rewriting without matching PDF.js page evidence fails closed", async () => {
+  const sourceBytes = await sourcePdf([
+    { text: "Original secret", x: 30, y: 100 },
+  ]);
+
+  await assert.rejects(
+    rawEditorExport.exportEditedPdf({
+      sourceBytes,
+      pages: [pageModel],
+      elements: [replacementElement("Original secret")],
+      filename: "missing-evidence.pdf",
+    }),
+    /PDF previews can only be loaded in the browser/i,
+  );
+});
+
+test("PDF.js evidence text must correspond to every raw text operation", async () => {
+  const sourceBytes = await sourcePdf([
+    { text: "Keep searchable", x: 30, y: 150 },
+    { text: "Original secret", x: 30, y: 100 },
+  ]);
+
+  await assert.rejects(
+    editorExport.exportEditedPdf({
+      sourceBytes,
+      pages: [pageModel],
+      elements: [replacementElement("Original secret")],
+      filename: "mismatched-evidence.pdf",
+      nativeTextEvidence: nativeTextEvidence("Original secret", [
+        { text: "Different evidence" },
+      ]),
+    }),
+    /PDF previews can only be loaded in the browser/i,
+  );
+});
+
+for (const fixture of [
+  {
+    label: "wrong source page",
+    mutate(evidence) {
+      evidence[0].sourcePageIndex = 1;
+    },
+  },
+  {
+    label: "duplicate fragment id",
+    mutate(evidence) {
+      evidence[0].fragments.push({
+        ...evidence[0].fragments[0],
+        text: "",
+      });
+    },
+  },
+  {
+    label: "changed selected geometry",
+    mutate(evidence) {
+      evidence[0].fragments[0].x += 0.02;
+    },
+  },
+  {
+    label: "changed immutable source geometry",
+    mutate(_evidence, edit) {
+      edit.sourceText.originalX += 0.02;
+    },
+  },
+  {
+    label: "rotated selected fragment",
+    mutate(evidence) {
+      evidence[0].fragments[0].rotation = 90;
+    },
+  },
+]) {
+  test(`native rewriting rejects ${fixture.label} evidence`, async () => {
+    const sourceBytes = await sourcePdf([
+      { text: "Original secret", x: 30, y: 100 },
+    ]);
+    const evidence = nativeTextEvidence("Original secret");
+    const edit = replacementElement("Original secret");
+    fixture.mutate(evidence, edit);
+
+    await assert.rejects(
+      editorExport.exportEditedPdf({
+        sourceBytes,
+        pages: [pageModel],
+        elements: [edit],
+        filename: "invalid-evidence.pdf",
+        nativeTextEvidence: evidence,
+      }),
+      /PDF previews can only be loaded in the browser/i,
+    );
+  });
+}
 
 test("positioned TJ arrays take the secure raster fallback", async () => {
   const sourceBytes = await sourcePdf(
@@ -633,6 +884,299 @@ test("a split invisible WinAnsi copy forces the secure raster fallback", async (
   );
 });
 
+test("an invisible case-variant copy forces the secure raster fallback", async () => {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  const page = document.addPage([300, 200]);
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  page.drawText("Original secret", {
+    x: 30,
+    y: 100,
+    size: 14,
+    font,
+  });
+  page.drawText("ORIGINAL SECRET", {
+    x: 30,
+    y: 50,
+    size: 14,
+    font,
+  });
+
+  const contents = page.node.Contents();
+  assert.ok(contents instanceof PDFArray);
+  const stream = contents.lookup(0, PDFStream);
+  assert.ok(stream instanceof PDFContentStream);
+  const source = new TextDecoder().decode(
+    stream.getUnencodedContents(),
+  );
+  const uppercaseTarget = Buffer.from("ORIGINAL SECRET")
+    .toString("hex")
+    .toUpperCase();
+  const needle = `<${uppercaseTarget}> Tj`;
+  const rewritten = source.replace(needle, `3 Tr\n${needle}`);
+  assert.notEqual(
+    rewritten,
+    source,
+    "fixture makes the case-variant text invisible",
+  );
+  const reference = document.context.register(
+    document.context.flateStream(rewritten),
+  );
+  page.node.set(
+    PDFName.of("Contents"),
+    document.context.obj([reference]),
+  );
+
+  const sourceBytes = await document.save({
+    useObjectStreams: true,
+  });
+  assert.deepEqual(
+    (await extractedTextItems(sourceBytes)).map((item) => item.str),
+    ["Original secret", "ORIGINAL SECRET"],
+  );
+
+  await assert.rejects(
+    editorExport.exportEditedPdf({
+      sourceBytes,
+      pages: [pageModel],
+      elements: [replacementElement("Original secret")],
+      filename: "case-variant-copy.pdf",
+      nativeTextEvidence: nativeTextEvidence("Original secret", [
+        {
+          text: "ORIGINAL SECRET",
+          x: 0.6,
+          y: 0.1,
+        },
+      ]),
+    }),
+    /PDF previews can only be loaded in the browser/i,
+  );
+});
+
+test("interleaved decoy operators cannot hide a fragmented duplicate", async () => {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  const page = document.addPage([300, 200]);
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  const fontSize = 14;
+  const firstPart = "Original";
+  page.drawText("Original secret", {
+    x: 30,
+    y: 100,
+    size: fontSize,
+    font,
+  });
+  page.drawText(firstPart, {
+    x: 30,
+    y: 100,
+    size: fontSize,
+    font,
+  });
+  page.drawText("DECOY", {
+    x: 10_000,
+    y: 10_000,
+    size: fontSize,
+    font,
+  });
+  page.drawText(" secret", {
+    x: 30 + font.widthOfTextAtSize(firstPart, fontSize),
+    y: 100,
+    size: fontSize,
+    font,
+  });
+  const sourceBytes = await document.save({
+    useObjectStreams: true,
+  });
+  const sourceStrings = (await extractedTextItems(sourceBytes)).map(
+    (item) => item.str,
+  );
+  assert.ok(
+    sourceStrings.filter((value) => value === "Original secret")
+      .length >= 2,
+    "the source exposes a complete duplicate despite the decoy operator",
+  );
+  let selectedEvidenceConsumed = false;
+  const additionalEvidence = sourceStrings.flatMap((text) => {
+    if (
+      text === "Original secret" &&
+      !selectedEvidenceConsumed
+    ) {
+      selectedEvidenceConsumed = true;
+      return [];
+    }
+    return [{ text }];
+  });
+
+  await assert.rejects(
+    editorExport.exportEditedPdf({
+      sourceBytes,
+      pages: [pageModel],
+      elements: [replacementElement("Original secret")],
+      filename: "interleaved-decoy.pdf",
+      nativeTextEvidence: nativeTextEvidence(
+        "Original secret",
+        additionalEvidence,
+      ),
+    }),
+    /PDF previews can only be loaded in the browser/i,
+  );
+});
+
+test("overlapping PDF.js evidence rejects a retained sensitive fragment", async () => {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  const page = document.addPage([300, 200]);
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  page.drawText("API key: ABCDEF", {
+    x: 30,
+    y: 100,
+    size: 14,
+    font,
+  });
+  page.drawText("ABCDEF", {
+    x: 82,
+    y: 100,
+    size: 14,
+    font,
+  });
+  const sourceBytes = await document.save({
+    useObjectStreams: true,
+  });
+  assert.deepEqual(
+    (await extractedTextItems(sourceBytes)).map((item) => item.str),
+    ["API key: ABCDEF", "ABCDEF"],
+  );
+
+  await assert.rejects(
+    editorExport.exportEditedPdf({
+      sourceBytes,
+      pages: [pageModel],
+      elements: [
+        replacementElement("API key: ABCDEF", "Credential removed"),
+      ],
+      filename: "overlapping-sensitive-fragment.pdf",
+      nativeTextEvidence: nativeTextEvidence("API key: ABCDEF", [
+        {
+          text: "ABCDEF",
+          x: 0.27,
+          y: 0.43,
+          width: 0.2,
+          height: 0.07,
+        },
+      ]),
+    }),
+    /PDF previews can only be loaded in the browser/i,
+  );
+});
+
+test("a Tj with an extra string operand takes the secure raster fallback", async () => {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  const page = document.addPage([300, 200]);
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  page.drawText("Original secret", {
+    x: 30,
+    y: 100,
+    size: 14,
+    font,
+  });
+  const contents = page.node.Contents();
+  assert.ok(contents instanceof PDFArray);
+  const stream = contents.lookup(0, PDFStream);
+  assert.ok(stream instanceof PDFContentStream);
+  const source = new TextDecoder().decode(
+    stream.getUnencodedContents(),
+  );
+  const target = Buffer.from("Original secret")
+    .toString("hex")
+    .toUpperCase();
+  const needle = `<${target}> Tj`;
+  assert.match(source, new RegExp(needle));
+  const rewritten = source.replace(
+    needle,
+    `<${target}> <${target}> Tj`,
+  );
+  const reference = document.context.register(
+    document.context.flateStream(rewritten),
+  );
+  page.node.set(
+    PDFName.of("Contents"),
+    document.context.obj([reference]),
+  );
+  const sourceBytes = await document.save({
+    useObjectStreams: true,
+  });
+  assert.deepEqual(
+    (await extractedTextItems(sourceBytes)).map((item) => item.str),
+    ["Original secret"],
+    "PDF.js renders only the final operand of the malformed Tj",
+  );
+
+  await assert.rejects(
+    editorExport.exportEditedPdf({
+      sourceBytes,
+      pages: [pageModel],
+      elements: [replacementElement("Original secret")],
+      filename: "extra-tj-operand.pdf",
+    }),
+    /PDF previews can only be loaded in the browser/i,
+  );
+});
+
+test("an unconsumed string operand takes the secure raster fallback", async () => {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  const page = document.addPage([300, 200]);
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  page.drawText("Original secret", {
+    x: 30,
+    y: 100,
+    size: 14,
+    font,
+  });
+  const contents = page.node.Contents();
+  assert.ok(contents instanceof PDFArray);
+  const stream = contents.lookup(0, PDFStream);
+  assert.ok(stream instanceof PDFContentStream);
+  const source = new TextDecoder().decode(
+    stream.getUnencodedContents(),
+  );
+  const hidden = Buffer.from("Original secret")
+    .toString("hex")
+    .toUpperCase();
+  const reference = document.context.register(
+    document.context.flateStream(
+      `<${hidden}> q\nQ\n${source}`,
+    ),
+  );
+  page.node.set(
+    PDFName.of("Contents"),
+    document.context.obj([reference]),
+  );
+  const sourceBytes = await document.save({
+    useObjectStreams: true,
+  });
+  assert.deepEqual(
+    (await extractedTextItems(sourceBytes)).map((item) => item.str),
+    ["Original secret"],
+  );
+
+  await assert.rejects(
+    editorExport.exportEditedPdf({
+      sourceBytes,
+      pages: [pageModel],
+      elements: [replacementElement("Original secret")],
+      filename: "unconsumed-string.pdf",
+    }),
+    /PDF previews can only be loaded in the browser/i,
+  );
+});
+
 test("a hidden Tj split across content streams forces the secure raster fallback", async () => {
   const document = await PDFDocument.create({
     updateMetadata: false,
@@ -696,6 +1240,186 @@ test("a hidden Tj split across content streams forces the secure raster fallback
       pages: [pageModel],
       elements: [replacementElement("Original secret")],
       filename: "split-stream-hidden-copy.pdf",
+    }),
+    /PDF previews can only be loaded in the browser/i,
+  );
+});
+
+test("a cyclic content-stream dictionary forces the secure raster fallback", async () => {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  const page = document.addPage([300, 200]);
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  page.drawText("Original secret", {
+    x: 30,
+    y: 100,
+    size: 14,
+    font,
+  });
+  const rawContents = page.node.get(
+    PDFName.of("Contents"),
+    true,
+  );
+  assert.ok(rawContents instanceof PDFArray);
+  const streamReference = rawContents.asArray()[0];
+  assert.ok(streamReference);
+  const stream = page.node.Contents()?.lookup(0, PDFStream);
+  assert.ok(stream instanceof PDFStream);
+  const loop = document.context.obj({});
+  const loopReference = document.context.register(loop);
+  stream.dict.set(PDFName.of("Loop"), loopReference);
+  loop.set(PDFName.of("Back"), streamReference);
+  const sourceBytes = await document.save({
+    useObjectStreams: true,
+  });
+
+  await assert.rejects(
+    editorExport.exportEditedPdf({
+      sourceBytes,
+      pages: [pageModel],
+      elements: [replacementElement("Original secret")],
+      filename: "cyclic-content-stream.pdf",
+    }),
+    /PDF previews can only be loaded in the browser/i,
+  );
+});
+
+for (const aliasKey of ["Backup", "ArtBox"]) {
+  test(`a /${aliasKey} alias to the old page contents forces the secure raster fallback`, async () => {
+    const document = await PDFDocument.create({
+      updateMetadata: false,
+    });
+    const page = document.addPage([300, 200]);
+    const font = await document.embedFont(StandardFonts.Helvetica);
+    page.drawText("Original secret", {
+      x: 30,
+      y: 100,
+      size: 14,
+      font,
+    });
+    const contents = page.node.get(PDFName.of("Contents"), true);
+    assert.ok(contents);
+    page.node.set(PDFName.of(aliasKey), contents);
+
+    await assert.rejects(
+      editorExport.exportEditedPdf({
+        sourceBytes: await document.save({
+          useObjectStreams: true,
+        }),
+        pages: [pageModel],
+        elements: [replacementElement("Original secret")],
+        filename: `content-alias-${aliasKey.toLowerCase()}.pdf`,
+      }),
+      /PDF previews can only be loaded in the browser/i,
+    );
+  });
+}
+
+test("an indirect /ArtBox chain to old contents forces raster fallback", async () => {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  const page = document.addPage([300, 200]);
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  page.drawText("Original secret", {
+    x: 30,
+    y: 100,
+    size: 14,
+    font,
+  });
+  const contents = page.node.get(PDFName.of("Contents"), true);
+  assert.ok(contents instanceof PDFArray);
+  const streamReference = contents.asArray()[0];
+  assert.ok(streamReference);
+  const wrapperReference =
+    document.context.register(streamReference);
+  page.node.set(PDFName.of("ArtBox"), wrapperReference);
+
+  await assert.rejects(
+    editorExport.exportEditedPdf({
+      sourceBytes: await document.save({
+        useObjectStreams: true,
+      }),
+      pages: [pageModel],
+      elements: [replacementElement("Original secret")],
+      filename: "indirect-content-alias.pdf",
+    }),
+    /PDF previews can only be loaded in the browser/i,
+  );
+});
+
+test("a nested reference in a content-stream dictionary forces raster fallback", async () => {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  const page = document.addPage([300, 200]);
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  page.drawText("Original secret", {
+    x: 30,
+    y: 100,
+    size: 14,
+    font,
+  });
+  const contents = page.node.Contents();
+  assert.ok(contents instanceof PDFArray);
+  const stream = contents.lookup(0, PDFStream);
+  const backup = document.context.register(
+    document.context.flateStream("Original secret"),
+  );
+  stream.dict.set(PDFName.of("Backup"), backup);
+
+  await assert.rejects(
+    editorExport.exportEditedPdf({
+      sourceBytes: await document.save({
+        useObjectStreams: true,
+      }),
+      pages: [pageModel],
+      elements: [replacementElement("Original secret")],
+      filename: "nested-content-reference.pdf",
+    }),
+    /PDF previews can only be loaded in the browser/i,
+  );
+});
+
+test("an inherited resource alias to old contents forces raster fallback", async () => {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  const page = document.addPage([300, 200]);
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  page.drawText("Original secret", {
+    x: 30,
+    y: 100,
+    size: 14,
+    font,
+  });
+  const contents = page.node.get(PDFName.of("Contents"), true);
+  const resources = page.node.get(PDFName.of("Resources"), true);
+  const parentReference = page.node.get(PDFName.of("Parent"), true);
+  assert.ok(contents);
+  assert.ok(resources);
+  assert.ok(parentReference);
+  const resourceDictionary = document.context.lookup(
+    resources,
+    PDFDict,
+  );
+  const parentDictionary = document.context.lookup(
+    parentReference,
+    PDFDict,
+  );
+  resourceDictionary.set(PDFName.of("Backup"), contents);
+  parentDictionary.set(PDFName.of("Resources"), resources);
+  page.node.delete(PDFName.of("Resources"));
+
+  await assert.rejects(
+    editorExport.exportEditedPdf({
+      sourceBytes: await document.save({
+        useObjectStreams: true,
+      }),
+      pages: [pageModel],
+      elements: [replacementElement("Original secret")],
+      filename: "inherited-content-alias.pdf",
     }),
     /PDF previews can only be loaded in the browser/i,
   );

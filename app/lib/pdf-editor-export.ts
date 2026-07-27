@@ -4,6 +4,7 @@ import {
   PDFDict,
   PDFDocument,
   PDFName,
+  PDFNumber,
   PDFRawStream,
   PDFRef,
   PDFStream,
@@ -71,10 +72,28 @@ export interface ExportEditedPdfInput {
   pages: EditorPage[];
   elements: EditorElement[];
   filename: string;
+  nativeTextEvidence?: NativeTextRewritePageEvidence[];
   /** Test/SSR injection; browsers load only the fixed same-origin allowlist. */
   fontAssetLoader?: PdfEditorFontAssetLoader;
   onProgress?: (value: number, label: string) => void;
   signal?: AbortSignal;
+}
+
+export interface NativeTextRewriteFragmentEvidence {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  hasGeometry: boolean;
+}
+
+export interface NativeTextRewritePageEvidence {
+  pageId: string;
+  sourcePageIndex: number;
+  fragments: NativeTextRewriteFragmentEvidence[];
 }
 
 export interface ExportEditedPdfResult {
@@ -163,6 +182,11 @@ interface ParsedPdfContent {
   textBlocks: PdfTextBlock[];
 }
 
+interface NormalizedPdfTextOperation {
+  operation: PdfTextShowOperation;
+  text: string;
+}
+
 interface PdfContentParseBudget {
   exhausted: boolean;
   tokens: number;
@@ -180,6 +204,12 @@ const MAX_VECTOR_TEXT_REWRITE_TEXT_BLOCKS = 10_000;
 const MAX_VECTOR_TEXT_REWRITE_SHOW_OPERATIONS = 25_000;
 const MAX_VECTOR_TEXT_REWRITE_OPERANDS = 4_096;
 const MAX_VECTOR_TEXT_REWRITE_SEARCH_WORK = 32 * 1024 * 1024;
+const MAX_VECTOR_TEXT_REWRITE_EVIDENCE_COMPARISONS = 5_000_000;
+const NORMALIZED_GEOMETRY_EPSILON = 0.000_001;
+const SAFE_VECTOR_CONTENT_STREAM_KEYS = new Set([
+  "Filter",
+  "Length",
+]);
 const VERIFIED_VECTOR_BASE_FONTS = new Set([
   "Courier",
   "Courier-Bold",
@@ -306,6 +336,53 @@ function normalizeVectorSearchText(value: string): string {
   return value
     .normalize("NFKC")
     .replace(VECTOR_IGNORABLE_TEXT_PATTERN, "");
+}
+
+function asciiCaseFoldCode(code: number): number {
+  return code >= 0x41 && code <= 0x5a ? code + 0x20 : code;
+}
+
+function asciiCaseFoldText(value: string): string {
+  let result = "";
+  for (let index = 0; index < value.length; index += 1) {
+    result += String.fromCharCode(
+      asciiCaseFoldCode(value.charCodeAt(index)),
+    );
+  }
+  return result;
+}
+
+function containsEquivalentTextSequence(
+  target: string,
+  texts: readonly string[],
+): boolean {
+  const foldedTarget = asciiCaseFoldText(target);
+  if (!foldedTarget) return true;
+
+  const boundaries = new Set<number>([0]);
+  const foldedTexts: string[] = [];
+  let combinedLength = 0;
+  for (const text of texts) {
+    const foldedText = asciiCaseFoldText(text);
+    if (!foldedText) continue;
+    foldedTexts.push(foldedText);
+    combinedLength += foldedText.length;
+    boundaries.add(combinedLength);
+  }
+  if (combinedLength < foldedTarget.length) return false;
+
+  const combined = foldedTexts.join("");
+  let match = combined.indexOf(foldedTarget);
+  while (match !== -1) {
+    if (
+      boundaries.has(match) &&
+      boundaries.has(match + foldedTarget.length)
+    ) {
+      return true;
+    }
+    match = combined.indexOf(foldedTarget, match + 1);
+  }
+  return false;
 }
 
 function skipPdfWhitespaceAndComments(
@@ -558,6 +635,7 @@ function readPdfCompositeToken(
 
   if (value === 0x5b) {
     let index = start + 1;
+    let nestedStringToken: PdfContentStringToken | undefined;
     while (index < bytes.length) {
       index = skipPdfWhitespaceAndComments(bytes, index);
       if (index >= bytes.length) return null;
@@ -566,7 +644,9 @@ function readPdfCompositeToken(
           end: index + 1,
           kind: "array",
           start,
-          stringTokens: [],
+          stringTokens: nestedStringToken
+            ? [nestedStringToken]
+            : [],
         };
       }
       const item = readPdfCompositeToken(
@@ -577,6 +657,7 @@ function readPdfCompositeToken(
       );
       if (budget.exhausted) return null;
       if (item) {
+        nestedStringToken ??= item.stringTokens[0];
         index = item.end;
         continue;
       }
@@ -590,6 +671,7 @@ function readPdfCompositeToken(
   if (value === 0x3c && bytes[start + 1] === 0x3c) {
     let dictionaryDepth = 1;
     let index = start + 2;
+    let nestedStringToken: PdfContentStringToken | undefined;
     while (index < bytes.length) {
       index = skipPdfWhitespaceAndComments(bytes, index);
       if (index >= bytes.length) return null;
@@ -613,7 +695,9 @@ function readPdfCompositeToken(
             end: index,
             kind: "dictionary",
             start,
-            stringTokens: [],
+            stringTokens: nestedStringToken
+              ? [nestedStringToken]
+              : [],
           };
         }
         continue;
@@ -626,6 +710,7 @@ function readPdfCompositeToken(
       );
       if (budget.exhausted) return null;
       if (item) {
+        nestedStringToken ??= item.stringTokens[0];
         index = item.end;
         continue;
       }
@@ -657,19 +742,18 @@ function readPdfCompositeToken(
 }
 
 function textShowOperation(
-  operands: readonly PdfContentToken[],
-): PdfTextShowOperation {
-  let operand = operands.at(-1);
+  operand: PdfContentToken,
+): PdfTextShowOperation | null {
   if (
-    operand?.kind !== "literal-string" &&
-    operand?.kind !== "hex-string"
+    operand.kind !== "literal-string" &&
+    operand.kind !== "hex-string"
   ) {
-    operand = undefined;
+    return null;
   }
 
   return {
-    stringTokens: operand?.stringTokens ?? [],
-    text: operand?.text ?? null,
+    stringTokens: operand.stringTokens,
+    text: operand.text ?? null,
   };
 }
 
@@ -707,6 +791,9 @@ function parsePdfContent(
     if (bare.end === index) return null;
     index = bare.end;
     const operator = bare.value;
+    const hasStringOperand = operands.some(
+      (operand) => operand.stringTokens.length > 0,
+    );
 
     if (
       isPdfNumber(operator) ||
@@ -728,6 +815,12 @@ function parsePdfContent(
     if (operator === "BI") {
       // Inline-image payloads can contain arbitrary operator-like bytes. The
       // safe path is to leave parsing to PDF.js and flatten the page.
+      return null;
+    }
+    if (operator !== "Tj" && hasStringOperand) {
+      // A string consumed by an unreviewed operator would remain recoverable
+      // after the selected Tj is neutralized. Nested array/dictionary strings
+      // are tracked as well, so malformed or extension operators fail closed.
       return null;
     }
     if (operator === "BMC" || operator === "BDC") {
@@ -769,12 +862,14 @@ function parsePdfContent(
       if (
         !currentBlock ||
         currentFontResourceName === null ||
+        operands.length !== 1 ||
         showOperationCount >=
           MAX_VECTOR_TEXT_REWRITE_SHOW_OPERATIONS
       ) {
         return null;
       }
-      const operation = textShowOperation(operands);
+      const operation = textShowOperation(operands[0]);
+      if (!operation) return null;
       currentBlock.showOperations.push(operation);
       showOperationCount += 1;
     } else if (
@@ -798,7 +893,9 @@ function parsePdfContent(
     operands = [];
   }
 
-  return currentBlock ? null : { textBlocks };
+  return currentBlock || operands.length > 0
+    ? null
+    : { textBlocks };
 }
 
 function neutralizePdfString(
@@ -921,25 +1018,63 @@ function verifiedVectorFontResourceNames(
   return verifiedNames;
 }
 
+function contentStreamDictionaryIsSafe(
+  stream: PDFStream,
+): boolean {
+  if (
+    stream.dict
+      .keys()
+      .some(
+        (key) =>
+          !SAFE_VECTOR_CONTENT_STREAM_KEYS.has(key.decodeText()),
+      )
+  ) {
+    return false;
+  }
+
+  const lengthKey = PDFName.of("Length");
+  try {
+    const length = stream.dict.lookup(lengthKey);
+    if (length && !(length instanceof PDFNumber)) return false;
+  } catch {
+    return false;
+  }
+
+  const filterKey = PDFName.of("Filter");
+  let filter: PDFObject | undefined;
+  try {
+    filter = stream.dict.lookup(filterKey);
+  } catch {
+    return false;
+  }
+  if (!filter) return true;
+
+  if (filter instanceof PDFName) {
+    return true;
+  }
+  if (filter instanceof PDFArray && filter.size() === 1) {
+    try {
+      filter.lookup(0, PDFName);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 function rawContentStreamEncoding(
   stream: PDFRawStream,
 ): "flate" | "none" | null {
   const filterKey = PDFName.of("Filter");
-  const decodeParametersKey = PDFName.of("DecodeParms");
-  if (stream.dict.has(decodeParametersKey)) return null;
-
   const filter = stream.dict.lookup(filterKey);
   if (!filter) return "none";
 
   let filterName: PDFName;
   if (filter instanceof PDFName) {
     filterName = filter;
-  } else if (filter instanceof PDFArray && filter.size() === 1) {
-    try {
-      filterName = filter.lookup(0, PDFName);
-    } catch {
-      return null;
-    }
+  } else if (filter instanceof PDFArray) {
+    filterName = filter.lookup(0, PDFName);
   } else {
     return null;
   }
@@ -1029,6 +1164,7 @@ function decodedPageContents(page: PDFPage): Uint8Array | null {
   let combinedBytes = 0;
   for (const stream of streams) {
     if (
+      !contentStreamDictionaryIsSafe(stream) ||
       stream.getContentsSize() >
       MAX_VECTOR_TEXT_REWRITE_CONTENT_BYTES
     ) {
@@ -1061,14 +1197,256 @@ function decodedPageContents(page: PDFPage): Uint8Array | null {
   return concatenateByteArrays(decoded);
 }
 
+interface NormalizedRectangle {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function hasValidNormalizedRectangle(
+  rectangle: NormalizedRectangle,
+): boolean {
+  return (
+    Number.isFinite(rectangle.x) &&
+    Number.isFinite(rectangle.y) &&
+    Number.isFinite(rectangle.width) &&
+    Number.isFinite(rectangle.height) &&
+    rectangle.x >= 0 &&
+    rectangle.y >= 0 &&
+    rectangle.width > 0 &&
+    rectangle.height > 0 &&
+    rectangle.x + rectangle.width <=
+      1 + NORMALIZED_GEOMETRY_EPSILON &&
+    rectangle.y + rectangle.height <=
+      1 + NORMALIZED_GEOMETRY_EPSILON
+  );
+}
+
+function normalizedRotation(value: number): number {
+  return ((value % 360) + 360) % 360;
+}
+
+function isUnrotatedEvidence(value: number): boolean {
+  if (!Number.isFinite(value)) return false;
+  const rotation = normalizedRotation(value);
+  return (
+    rotation <= NORMALIZED_GEOMETRY_EPSILON ||
+    360 - rotation <= NORMALIZED_GEOMETRY_EPSILON
+  );
+}
+
+function hasValidNormalizedGeometry(
+  fragment: NativeTextRewriteFragmentEvidence,
+): boolean {
+  return (
+    fragment.hasGeometry &&
+    hasValidNormalizedRectangle(fragment) &&
+    isUnrotatedEvidence(fragment.rotation)
+  );
+}
+
+function normalizedRectanglesMatch(
+  first: NormalizedRectangle,
+  second: NormalizedRectangle,
+): boolean {
+  return (
+    Math.abs(first.x - second.x) <= NORMALIZED_GEOMETRY_EPSILON &&
+    Math.abs(first.y - second.y) <= NORMALIZED_GEOMETRY_EPSILON &&
+    Math.abs(first.width - second.width) <=
+      NORMALIZED_GEOMETRY_EPSILON &&
+    Math.abs(first.height - second.height) <=
+      NORMALIZED_GEOMETRY_EPSILON
+  );
+}
+
+function normalizedRectanglesOverlap(
+  first: NormalizedRectangle,
+  second: NormalizedRectangle,
+): boolean {
+  const overlapWidth =
+    Math.min(first.x + first.width, second.x + second.width) -
+    Math.max(first.x, second.x);
+  const overlapHeight =
+    Math.min(first.y + first.height, second.y + second.height) -
+    Math.max(first.y, second.y);
+  return (
+    overlapWidth > NORMALIZED_GEOMETRY_EPSILON &&
+    overlapHeight > NORMALIZED_GEOMETRY_EPSILON
+  );
+}
+
+function incrementTextCount(
+  counts: Map<string, number>,
+  text: string,
+): void {
+  counts.set(text, (counts.get(text) ?? 0) + 1);
+}
+
+function textCountsMatch(
+  evidenceCounts: ReadonlyMap<string, number>,
+  operationCounts: ReadonlyMap<string, number>,
+): boolean {
+  if (evidenceCounts.size !== operationCounts.size) return false;
+  for (const [text, count] of evidenceCounts) {
+    if (operationCounts.get(text) !== count) return false;
+  }
+  return true;
+}
+
+function evidenceSupportsVectorRewrite(
+  evidence: NativeTextRewritePageEvidence | undefined,
+  edits: readonly TextEditorElement[],
+  normalizedOperations: readonly NormalizedPdfTextOperation[],
+): boolean {
+  if (
+    !evidence ||
+    evidence.fragments.length >
+      PDF_SECURITY_LIMITS.maxTextItemsPerPage ||
+    evidence.fragments.length * edits.length >
+      MAX_VECTOR_TEXT_REWRITE_EVIDENCE_COMPARISONS
+  ) {
+    return false;
+  }
+
+  let characterCount = 0;
+  const evidenceById = new Map<
+    string,
+    NativeTextRewriteFragmentEvidence
+  >();
+  const searchableEvidence: NativeTextRewriteFragmentEvidence[] = [];
+  const evidenceTextCounts = new Map<string, number>();
+  for (const fragment of evidence.fragments) {
+    if (
+      !fragment.id ||
+      evidenceById.has(fragment.id) ||
+      typeof fragment.text !== "string"
+    ) {
+      return false;
+    }
+    characterCount += fragment.text.length;
+    if (
+      characterCount >
+      PDF_SECURITY_LIMITS.maxTextCharactersPerPage
+    ) {
+      return false;
+    }
+    evidenceById.set(fragment.id, fragment);
+    const normalizedText = normalizeVectorSearchText(fragment.text);
+    if (normalizedText) {
+      searchableEvidence.push(fragment);
+      incrementTextCount(evidenceTextCounts, normalizedText);
+    }
+  }
+  const operationTextCounts = new Map<string, number>();
+  for (const operation of normalizedOperations) {
+    incrementTextCount(operationTextCounts, operation.text);
+  }
+  if (
+    searchableEvidence.length !== normalizedOperations.length ||
+    !textCountsMatch(evidenceTextCounts, operationTextCounts)
+  ) {
+    return false;
+  }
+
+  const selectedIds = new Set<string>();
+  const sourceRects: NormalizedRectangle[] = [];
+  const normalizedTargets: string[] = [];
+  for (const edit of edits) {
+    const source = edit.sourceText;
+    if (
+      source?.kind !== "native" ||
+      selectedIds.has(source.id)
+    ) {
+      return false;
+    }
+    const selectedEvidence = evidenceById.get(source.id);
+    if (
+      !selectedEvidence ||
+      selectedEvidence.text !== source.originalText ||
+      !hasValidNormalizedGeometry(selectedEvidence) ||
+      !hasValidNormalizedRectangle({
+        x: source.originalX,
+        y: source.originalY,
+        width: source.originalWidth,
+        height: source.originalHeight,
+      }) ||
+      !isUnrotatedEvidence(source.originalRotation) ||
+      !normalizedRectanglesMatch(selectedEvidence, {
+        x: source.originalX,
+        y: source.originalY,
+        width: source.originalWidth,
+        height: source.originalHeight,
+      })
+    ) {
+      return false;
+    }
+    selectedIds.add(source.id);
+    normalizedTargets.push(
+      normalizeVectorSearchText(source.originalText),
+    );
+    sourceRects.push({
+      x: source.originalX,
+      y: source.originalY,
+      width: source.originalWidth,
+      height: source.originalHeight,
+    });
+  }
+
+  const unselectedEvidenceTexts = searchableEvidence.flatMap(
+    (fragment) =>
+      selectedIds.has(fragment.id)
+        ? []
+        : [normalizeVectorSearchText(fragment.text)],
+  );
+  if (
+    normalizedTargets.some((target) =>
+      containsEquivalentTextSequence(
+        target,
+        unselectedEvidenceTexts,
+      ),
+    )
+  ) {
+    return false;
+  }
+
+  for (const fragment of searchableEvidence) {
+    if (selectedIds.has(fragment.id)) continue;
+    if (!hasValidNormalizedGeometry(fragment)) return false;
+    if (
+      sourceRects.some((sourceRect) =>
+        normalizedRectanglesOverlap(fragment, sourceRect),
+      )
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function unselectedTextContainsEquivalentTarget(
+  target: string,
+  operations: readonly NormalizedPdfTextOperation[],
+  selected: ReadonlySet<PdfTextShowOperation>,
+): boolean {
+  return containsEquivalentTextSequence(
+    target,
+    operations.flatMap(({ operation, text }) =>
+      selected.has(operation) ? [] : [text],
+    ),
+  );
+}
+
 function rewrittenSourcePageContents(
   sourcePage: PDFPage,
   edits: readonly TextEditorElement[],
+  evidence: NativeTextRewritePageEvidence | undefined,
 ): Uint8Array | null {
   if (edits.some((edit) => edit.sourceText?.kind !== "native")) {
     return null;
   }
   if (sourcePageHasFormXObjects(sourcePage)) return null;
+  if (!sourcePageContentIsExclusivelyOwned(sourcePage)) return null;
   const verifiedFontNames =
     verifiedVectorFontResourceNames(sourcePage);
   if (!verifiedFontNames) return null;
@@ -1086,11 +1464,7 @@ function rewrittenSourcePageContents(
     string,
     { count: number; operation: PdfTextShowOperation }
   >();
-  const orderedNormalizedText: string[] = [];
-  const normalizedRanges = new Map<
-    PdfTextShowOperation,
-    { end: number; start: number }
-  >();
+  const normalizedOperations: NormalizedPdfTextOperation[] = [];
   let normalizedCharacterCount = 0;
   for (const block of parsed.textBlocks) {
     if (block.showOperations.length > 1) return null;
@@ -1104,13 +1478,13 @@ function rewrittenSourcePageContents(
       const normalizedText = normalizeVectorSearchText(
         operation.text,
       );
-      const range = {
-        start: normalizedCharacterCount,
-        end: normalizedCharacterCount + normalizedText.length,
-      };
-      normalizedRanges.set(operation, range);
-      orderedNormalizedText.push(normalizedText);
-      normalizedCharacterCount = range.end;
+      if (normalizedText) {
+        normalizedOperations.push({
+          operation,
+          text: normalizedText,
+        });
+        normalizedCharacterCount += normalizedText.length;
+      }
       const existing = operationsByText.get(operation.text);
       if (existing) {
         existing.count += 1;
@@ -1131,35 +1505,38 @@ function rewrittenSourcePageContents(
   ) {
     return null;
   }
-  const normalizedPageText = orderedNormalizedText.join("");
   const selected = new Set<PdfTextShowOperation>();
+  const normalizedOriginals: string[] = [];
   for (const edit of edits) {
     const originalText = edit.sourceText?.originalText;
     if (!originalText) return null;
     const normalizedOriginal = normalizeVectorSearchText(originalText);
     const match = operationsByText.get(originalText);
-    const normalizedRange = match
-      ? normalizedRanges.get(match.operation)
-      : undefined;
-    const firstNormalizedMatch = normalizedOriginal
-      ? normalizedPageText.indexOf(normalizedOriginal)
-      : -1;
     if (
       !normalizedOriginal ||
       match?.count !== 1 ||
-      !normalizedRange ||
-      firstNormalizedMatch !== normalizedRange.start ||
-      firstNormalizedMatch + normalizedOriginal.length !==
-        normalizedRange.end ||
-      normalizedPageText.indexOf(
-        normalizedOriginal,
-        firstNormalizedMatch + 1,
-      ) !== -1 ||
       selected.has(match.operation)
     ) {
       return null;
     }
     selected.add(match.operation);
+    normalizedOriginals.push(normalizedOriginal);
+  }
+  if (
+    !evidenceSupportsVectorRewrite(
+      evidence,
+      edits,
+      normalizedOperations,
+    ) ||
+    normalizedOriginals.some((originalText) =>
+      unselectedTextContainsEquivalentTarget(
+        originalText,
+        normalizedOperations,
+        selected,
+      ),
+    )
+  ) {
+    return null;
   }
 
   const rewritten = copyBytes(contents);
@@ -1171,28 +1548,62 @@ function rewrittenSourcePageContents(
   return rewritten;
 }
 
+function resolvePdfReferenceChain(
+  document: PDFDocument,
+  root: PDFObject,
+  onReference?: (reference: PDFRef) => void,
+): PDFObject | null {
+  let object = root;
+  const seen = new Set<string>();
+  for (
+    let depth = 0;
+    object instanceof PDFRef;
+    depth += 1
+  ) {
+    if (depth >= PDF_SECURITY_LIMITS.maxPdfObjectGraphDepth) {
+      return null;
+    }
+    const key = pdfReferenceKey(object);
+    if (seen.has(key)) return null;
+    seen.add(key);
+    onReference?.(object);
+    try {
+      const resolved = document.context.lookup(object);
+      if (!resolved) return null;
+      object = resolved;
+    } catch {
+      return null;
+    }
+  }
+  return object;
+}
+
 function referencedContentObjects(
   document: PDFDocument,
   page: PDFPage,
-): PDFRef[] {
-  const references: PDFRef[] = [];
+): PDFRef[] | null {
+  const references = new Map<string, PDFRef>();
+  const remember = (reference: PDFRef): void => {
+    references.set(pdfReferenceKey(reference), reference);
+  };
   const raw = page.node.get(PDFName.of("Contents"), true);
-  if (!raw) return references;
-  let contents = raw;
-  if (contents instanceof PDFRef) {
-    references.push(contents);
-    try {
-      contents = document.context.lookup(contents) ?? contents;
-    } catch {
-      return references;
-    }
-  }
+  if (!raw) return [];
+  const contents = resolvePdfReferenceChain(
+    document,
+    raw,
+    remember,
+  );
+  if (!contents) return null;
   if (contents instanceof PDFArray) {
-    for (const object of contents.asArray()) {
-      if (object instanceof PDFRef) references.push(object);
+    for (const entry of contents.asArray()) {
+      if (
+        !resolvePdfReferenceChain(document, entry, remember)
+      ) {
+        return null;
+      }
     }
   }
-  return references;
+  return [...references.values()];
 }
 
 function samePdfReference(first: PDFRef, second: PDFRef): boolean {
@@ -1206,10 +1617,42 @@ function pdfReferenceKey(reference: PDFRef): string {
   return `${reference.objectNumber}:${reference.generationNumber}`;
 }
 
+interface PdfObjectTraversalBudget {
+  entries: number;
+}
+
+function canContainPdfReferences(object: PDFObject): boolean {
+  return (
+    object instanceof PDFRef ||
+    object instanceof PDFArray ||
+    object instanceof PDFStream ||
+    object instanceof PDFDict
+  );
+}
+
+function appendTraversablePdfObjects(
+  values: Iterable<PDFObject>,
+  pending: PDFObject[],
+  budget: PdfObjectTraversalBudget,
+): boolean {
+  for (const value of values) {
+    budget.entries += 1;
+    if (
+      budget.entries >
+      PDF_SECURITY_LIMITS.maxPdfObjectGraphNodes
+    ) {
+      return false;
+    }
+    if (canContainPdfReferences(value)) pending.push(value);
+  }
+  return true;
+}
+
 function candidateReferencesInObject(
   root: PDFObject,
   candidateKeys: ReadonlySet<string>,
-): Set<string> {
+  budget: PdfObjectTraversalBudget,
+): Set<string> | null {
   const references = new Set<string>();
   const stack: PDFObject[] = [root];
   const seen = new Set<PDFObject>();
@@ -1225,14 +1668,206 @@ function candidateReferencesInObject(
     seen.add(object);
 
     if (object instanceof PDFArray) {
-      stack.push(...object.asArray());
+      if (
+        !appendTraversablePdfObjects(
+          object.asArray(),
+          stack,
+          budget,
+        )
+      ) {
+        return null;
+      }
     } else if (object instanceof PDFStream) {
-      stack.push(object.dict);
+      if (
+        !appendTraversablePdfObjects(
+          [object.dict],
+          stack,
+          budget,
+        )
+      ) {
+        return null;
+      }
     } else if (object instanceof PDFDict) {
-      stack.push(...object.values());
+      if (
+        !appendTraversablePdfObjects(
+          object.values(),
+          stack,
+          budget,
+        )
+      ) {
+        return null;
+      }
     }
   }
   return references;
+}
+
+function sourcePageContentCandidates(page: PDFPage): {
+  objects: Set<PDFObject>;
+  references: Set<string>;
+} | null {
+  const rawContents = page.node.get(PDFName.of("Contents"), true);
+  if (!rawContents) return null;
+
+  const objects = new Set<PDFObject>();
+  const references = new Set<string>();
+  const resolve = (object: PDFObject): PDFObject | null => {
+    return resolvePdfReferenceChain(
+      page.doc,
+      object,
+      (reference) =>
+        references.add(pdfReferenceKey(reference)),
+    );
+  };
+
+  const contents = resolve(rawContents);
+  if (!contents) return null;
+  objects.add(contents);
+  if (contents instanceof PDFStream) {
+    return contentStreamDictionaryIsSafe(contents)
+      ? { objects, references }
+      : null;
+  }
+  if (
+    !(contents instanceof PDFArray) ||
+    contents.size() === 0 ||
+    contents.size() >
+      MAX_VECTOR_TEXT_REWRITE_CONTENT_STREAMS
+  ) {
+    return null;
+  }
+
+  for (const entry of contents.asArray()) {
+    const stream = resolve(entry);
+    if (
+      !(stream instanceof PDFStream) ||
+      !contentStreamDictionaryIsSafe(stream)
+    ) {
+      return null;
+    }
+    objects.add(stream);
+  }
+  return { objects, references };
+}
+
+function sourcePageContentIsExclusivelyOwned(
+  page: PDFPage,
+): boolean {
+  const candidates = sourcePageContentCandidates(page);
+  if (!candidates) return false;
+
+  const pending: PDFObject[] = [];
+  const traversalBudget: PdfObjectTraversalBudget = { entries: 0 };
+  const inheritedKeys = [
+    "Resources",
+    "MediaBox",
+    "CropBox",
+    "Rotate",
+  ] as const;
+  for (const [key, value] of page.node.entries()) {
+    const name = key.decodeText();
+    if (name !== "Contents" && name !== "Parent") {
+      if (
+        !appendTraversablePdfObjects(
+          [value],
+          pending,
+          traversalBudget,
+        )
+      ) {
+        return false;
+      }
+    }
+  }
+  for (const key of inheritedKeys) {
+    const name = PDFName.of(key);
+    if (page.node.get(name) === undefined) {
+      const inherited = page.node.getInheritableAttribute(name);
+      if (
+        inherited &&
+        !appendTraversablePdfObjects(
+          [inherited],
+          pending,
+          traversalBudget,
+        )
+      ) {
+        return false;
+      }
+    }
+  }
+
+  const seenObjects = new Set<PDFObject>();
+  const seenReferences = new Set<string>();
+  while (pending.length > 0) {
+    let object = pending.pop();
+    if (!object) continue;
+    let alreadyTraversed = false;
+    let referenceDepth = 0;
+    while (object instanceof PDFRef) {
+      if (
+        referenceDepth >=
+        PDF_SECURITY_LIMITS.maxPdfObjectGraphDepth
+      ) {
+        return false;
+      }
+      referenceDepth += 1;
+      const key = pdfReferenceKey(object);
+      if (candidates.references.has(key)) return false;
+      if (seenReferences.has(key)) {
+        alreadyTraversed = true;
+        break;
+      }
+      seenReferences.add(key);
+      try {
+        object = page.doc.context.lookup(object) ?? undefined;
+      } catch {
+        return false;
+      }
+      if (!object) return false;
+    }
+    if (alreadyTraversed) continue;
+    if (candidates.objects.has(object)) return false;
+    if (seenObjects.has(object)) continue;
+    seenObjects.add(object);
+    if (
+      seenObjects.size >
+      PDF_SECURITY_LIMITS.maxPdfObjectGraphNodes
+    ) {
+      return false;
+    }
+
+    if (object instanceof PDFArray) {
+      if (
+        !appendTraversablePdfObjects(
+          object.asArray(),
+          pending,
+          traversalBudget,
+        )
+      ) {
+        return false;
+      }
+    } else if (object instanceof PDFStream) {
+      if (
+        !appendTraversablePdfObjects(
+          [object.dict],
+          pending,
+          traversalBudget,
+        )
+      ) {
+        return false;
+      }
+    } else if (object instanceof PDFDict) {
+      if (
+        !appendTraversablePdfObjects(
+          object.values(),
+          pending,
+          traversalBudget,
+        )
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 function deleteUnreferencedObjects(
@@ -1250,6 +1885,18 @@ function deleteUnreferencedObjects(
   const candidateKeys = new Set(candidateByKey.keys());
   const candidateEdges = new Map<string, Set<string>>();
   const liveCandidates = new Set<string>();
+  const traversalBudget: PdfObjectTraversalBudget = { entries: 0 };
+  const indirectObjects = document.context.enumerateIndirectObjects();
+  if (
+    indirectObjects.length >
+    PDF_SECURITY_LIMITS.maxPdfObjectGraphNodes
+  ) {
+    throw securityLimitError({
+      code: "pdf-object-graph-too-large",
+      maximum: PDF_SECURITY_LIMITS.maxPdfObjectGraphNodes,
+    });
+  }
+  traversalBudget.entries = indirectObjects.length;
 
   /*
    * Build the candidate reference graph once. References from ordinary
@@ -1257,9 +1904,19 @@ function deleteUnreferencedObjects(
    * only when their owner is live. This safely removes unreferenced cycles
    * without rescanning the complete PDF once per old content stream.
    */
-  for (const [owner, object] of document.context.enumerateIndirectObjects()) {
+  for (const [owner, object] of indirectObjects) {
     const ownerKey = pdfReferenceKey(owner);
-    const references = candidateReferencesInObject(object, candidateKeys);
+    const references = candidateReferencesInObject(
+      object,
+      candidateKeys,
+      traversalBudget,
+    );
+    if (!references) {
+      throw securityLimitError({
+        code: "pdf-object-graph-too-large",
+        maximum: PDF_SECURITY_LIMITS.maxPdfObjectGraphNodes,
+      });
+    }
     if (candidateKeys.has(ownerKey)) {
       candidateEdges.set(ownerKey, references);
     } else {
@@ -1289,6 +1946,11 @@ function replacePageContents(
   contents: Uint8Array,
 ): void {
   const obsoleteReferences = referencedContentObjects(document, page);
+  if (!obsoleteReferences) {
+    throw new Error(
+      "The original page content graph could not be replaced safely.",
+    );
+  }
   const streamReference = document.context.register(
     document.context.flateStream(contents),
   );
@@ -2567,23 +3229,20 @@ async function drawElement(
   }
 }
 
-const NONVISUAL_OR_ACTIVE_PAGE_KEYS = Object.freeze([
-  "AA",
-  "AcroForm",
-  "AF",
-  "B",
-  "Collection",
-  "Dur",
-  "EmbeddedFiles",
-  "JavaScript",
-  "Metadata",
-  "Names",
-  "OpenAction",
-  "PieceInfo",
-  "PresSteps",
-  "Thumb",
-  "Trans",
-] as const);
+const SAFE_COPIED_PAGE_KEYS = new Set([
+  "Annots",
+  "ArtBox",
+  "BleedBox",
+  "Contents",
+  "CropBox",
+  "MediaBox",
+  "Parent",
+  "Resources",
+  "Rotate",
+  "TrimBox",
+  "Type",
+  "UserUnit",
+]);
 
 /**
  * `copyPages` retains the complete page dictionary. Interactive annotations,
@@ -2593,9 +3252,9 @@ const NONVISUAL_OR_ACTIVE_PAGE_KEYS = Object.freeze([
  */
 function sourcePageRequiresFlattening(page: PDFPage): boolean {
   if (
-    NONVISUAL_OR_ACTIVE_PAGE_KEYS.some(
-      (key) => page.node.get(PDFName.of(key)) !== undefined,
-    )
+    page.node
+      .entries()
+      .some(([key]) => !SAFE_COPIED_PAGE_KEYS.has(key.decodeText()))
   ) {
     return true;
   }
@@ -3020,6 +3679,27 @@ export async function exportEditedPdf(
       pageElements.push(element);
       elementsByPage.set(element.pageId, pageElements);
     }
+    const nativeTextEvidenceByPage = new Map<
+      string,
+      NativeTextRewritePageEvidence
+    >();
+    const duplicateEvidencePageIds = new Set<string>();
+    if (
+      (input.nativeTextEvidence?.length ?? 0) <=
+      PDF_SECURITY_LIMITS.maxPages
+    ) {
+      for (const evidence of input.nativeTextEvidence ?? []) {
+        if (
+          duplicateEvidencePageIds.has(evidence.pageId) ||
+          nativeTextEvidenceByPage.has(evidence.pageId)
+        ) {
+          nativeTextEvidenceByPage.delete(evidence.pageId);
+          duplicateEvidencePageIds.add(evidence.pageId);
+          continue;
+        }
+        nativeTextEvidenceByPage.set(evidence.pageId, evidence);
+      }
+    }
 
     for (let index = 0; index < input.pages.length; index += 1) {
       throwIfAborted(input.signal, "PDF export was cancelled.");
@@ -3051,6 +3731,8 @@ export async function exportEditedPdf(
         }
         const mustFlattenSourcePage =
           sourcePageRequiresFlattening(sourcePage);
+        const pageTextEvidence =
+          nativeTextEvidenceByPage.get(model.id);
         const rewrittenContents =
           !mustFlattenSourcePage &&
           ocrSourceTextEdits.length === 0 &&
@@ -3058,6 +3740,10 @@ export async function exportEditedPdf(
             ? rewrittenSourcePageContents(
                 sourcePage,
                 nativeSourceTextEdits,
+                pageTextEvidence?.sourcePageIndex ===
+                  model.sourcePageIndex
+                  ? pageTextEvidence
+                  : undefined,
               )
             : null;
         if (

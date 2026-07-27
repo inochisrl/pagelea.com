@@ -218,6 +218,8 @@ test("Private Rewrite exposes local OCR, cancellation, and mobile-safe controls"
   assert.match(localOcrSource, /import\("tesseract\.js"\)/);
   assert.match(localOcrSource, /workerBlobURL:\s*false/);
   assert.match(localOcrSource, /gzip:\s*false/);
+  assert.match(editorSource, /nativeTextEvidence/);
+  assert.match(exportSource, /evidenceSupportsVectorRewrite/);
   assert.match(
     exportSource,
     /loadPdfPreview\(\s*input\.sourceBytes,\s*\{\s*signal:\s*input\.signal\s*\},?\s*\)/,

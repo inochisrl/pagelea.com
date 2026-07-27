@@ -3,7 +3,7 @@ import { ArrowUpRight, Heart } from "lucide-react";
 import { TOOLS } from "../lib/tools";
 import styles from "./SiteFooter.module.css";
 
-const DEPLOYED_VERSION = "v0.4.0";
+const DEPLOYED_VERSION = "v0.4.1";
 const DEPLOYED_SOURCE_URL =
   `https://github.com/inochisrl/pagelea.com/tree/${DEPLOYED_VERSION}`;
 

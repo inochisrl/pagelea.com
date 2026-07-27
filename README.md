@@ -235,11 +235,20 @@ The detailed implementation review is retained in
   printable-ASCII `Tj` operations. Custom or embedded fonts, `ExtGState` text,
   non-printable bytes, positioned `TJ` arrays, quote operators, ambiguous
   encodings, nested form content, annotations, or unsupported streams use a
-  fail-closed raster fallback; that page can lose selection, accessibility
-  structure, and vector fidelity.
+  fail-closed raster fallback. Vector preservation also requires complete
+  matching PDF.js text-layer evidence, no unselected text fragment overlapping
+  an edited source rectangle, and no retained alias to the old content streams
+  through the copied page graph. If any proof is missing, the page is
+  rasterized and can lose selection, accessibility structure, and vector
+  fidelity.
 - OCR-backed replacements always use that secure raster path on the affected
   source page after removing the old pixels; unrelated source text on that
   page is no longer independently selectable.
+- Private Rewrite is an editing workflow, not certified forensic redaction.
+  A PDF can contain non-rendered copies in comments, metadata, resources, or
+  other objects that are outside the visible/searchable text layer. Use
+  Sanitize & Flatten and independently inspect the result before relying on it
+  for sensitive redaction.
 - Secure raster export is bounded to 16 megapixels per page, 100 flattened
   pages, 80 megapixels in aggregate, and 128 MB of encoded page images; split
   a document if those safety budgets are reached. Pagelea never lowers a

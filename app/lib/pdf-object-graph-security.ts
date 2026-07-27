@@ -17,13 +17,36 @@ import {
 function resolveObject(
   document: PDFDocument,
   object: PDFObject,
+  onReference?: () => void,
 ): PDFObject | undefined {
-  if (!(object instanceof PDFRef)) return object;
-  try {
-    return document.context.lookup(object);
-  } catch {
-    return undefined;
+  let current: PDFObject | undefined = object;
+  const seenReferences = new Set<string>();
+  let depth = 0;
+  while (current instanceof PDFRef) {
+    if (depth >= PDF_SECURITY_LIMITS.maxPdfObjectGraphDepth) {
+      throwGraphLimit({
+        code: "pdf-object-graph-too-deep",
+        maximum: PDF_SECURITY_LIMITS.maxPdfObjectGraphDepth,
+      });
+    }
+    const key =
+      `${current.objectNumber}:${current.generationNumber}`;
+    if (seenReferences.has(key)) {
+      throwGraphLimit({
+        code: "pdf-object-graph-too-deep",
+        maximum: PDF_SECURITY_LIMITS.maxPdfObjectGraphDepth,
+      });
+    }
+    seenReferences.add(key);
+    depth += 1;
+    onReference?.();
+    try {
+      current = document.context.lookup(current);
+    } catch {
+      return undefined;
+    }
   }
+  return current;
 }
 
 function asContainer(
@@ -65,15 +88,25 @@ export function assertPdfPageTreeWithinLimits(
   document: PDFDocument,
 ): void {
   const rawPages = document.catalog.get(PDFName.of("Pages"), true);
+  let rootReferenceDepth = 0;
   const root = rawPages
-    ? asContainer(resolveObject(document, rawPages))
+    ? asContainer(
+        resolveObject(
+          document,
+          rawPages,
+          () => {
+            rootReferenceDepth += 1;
+          },
+        ),
+      )
     : undefined;
   if (!root) return;
 
   let pageLeaves = 0;
+  let visitedEntries = 0;
   const seenBranches = new Set<PDFObject>();
   const stack: Array<{ object: PDFObject; depth: number }> = [
-    { object: root, depth: 0 },
+    { object: root, depth: rootReferenceDepth },
   ];
 
   while (stack.length > 0) {
@@ -116,9 +149,28 @@ export function assertPdfPageTreeWithinLimits(
     if (!(kids instanceof PDFArray)) continue;
 
     for (let index = 0; index < kids.size(); index += 1) {
+      visitedEntries += 1;
+      if (
+        visitedEntries >
+        PDF_SECURITY_LIMITS.maxPdfObjectGraphNodes
+      ) {
+        throwGraphLimit({
+          code: "pdf-object-graph-too-large",
+          maximum: PDF_SECURITY_LIMITS.maxPdfObjectGraphNodes,
+        });
+      }
       const rawKid = kids.get(index);
+      let kidReferenceDepth = 0;
       const kid = rawKid
-        ? asContainer(resolveObject(document, rawKid))
+        ? asContainer(
+            resolveObject(
+              document,
+              rawKid,
+              () => {
+                kidReferenceDepth += 1;
+              },
+            ),
+          )
         : undefined;
       const kidDictionary =
         kid instanceof PDFStream
@@ -127,9 +179,17 @@ export function assertPdfPageTreeWithinLimits(
             ? kid
             : undefined;
       if (!kid || !kidDictionary) continue;
+      const kidDepth =
+        entry.depth + 1 + kidReferenceDepth;
+      if (kidDepth > PDF_SECURITY_LIMITS.maxPdfObjectGraphDepth) {
+        throwGraphLimit({
+          code: "pdf-object-graph-too-deep",
+          maximum: PDF_SECURITY_LIMITS.maxPdfObjectGraphDepth,
+        });
+      }
       const type = resolvedName(document, kidDictionary, "Type");
       if (type === "Pages") {
-        stack.push({ object: kid, depth: entry.depth + 1 });
+        stack.push({ object: kid, depth: kidDepth });
       } else if (type === "Page") {
         pageLeaves += 1;
         const pageIssue =
@@ -156,23 +216,54 @@ export function assertPdfPageGraphWithinLimits(
 ): void {
   const shallowestDepth = new Map<PDFObject, number>();
   const stack: Array<{ object: PDFObject; depth: number }> = [];
+  let visitedEntries = 0;
+
+  const recordEntry = (): void => {
+    visitedEntries += 1;
+    if (
+      visitedEntries >
+      PDF_SECURITY_LIMITS.maxPdfObjectGraphNodes
+    ) {
+      throwGraphLimit({
+        code: "pdf-object-graph-too-large",
+        maximum: PDF_SECURITY_LIMITS.maxPdfObjectGraphNodes,
+      });
+    }
+  };
 
   const enqueue = (
     rawObject: PDFObject | undefined,
     depth: number,
   ): void => {
     if (!rawObject) return;
-    const object = asContainer(resolveObject(document, rawObject));
-    if (!object) return;
-    if (depth > PDF_SECURITY_LIMITS.maxPdfObjectGraphDepth) {
+    let referenceDepth = 0;
+    const resolvedObject = resolveObject(
+      document,
+      rawObject,
+      () => {
+        referenceDepth += 1;
+      },
+    );
+    const resolvedDepth = depth + referenceDepth;
+    if (
+      resolvedDepth >
+      PDF_SECURITY_LIMITS.maxPdfObjectGraphDepth
+    ) {
       throwGraphLimit({
         code: "pdf-object-graph-too-deep",
         maximum: PDF_SECURITY_LIMITS.maxPdfObjectGraphDepth,
       });
     }
+    const object = asContainer(resolvedObject);
+    if (!object) return;
     const previousDepth = shallowestDepth.get(object);
-    if (previousDepth !== undefined && previousDepth <= depth) return;
-    shallowestDepth.set(object, depth);
+    if (
+      previousDepth !== undefined &&
+      previousDepth <= resolvedDepth
+    ) {
+      return;
+    }
+    shallowestDepth.set(object, resolvedDepth);
     if (
       shallowestDepth.size >
       PDF_SECURITY_LIMITS.maxPdfObjectGraphNodes
@@ -182,7 +273,7 @@ export function assertPdfPageGraphWithinLimits(
         maximum: PDF_SECURITY_LIMITS.maxPdfObjectGraphNodes,
       });
     }
-    stack.push({ object, depth });
+    stack.push({ object, depth: resolvedDepth });
   };
 
   for (const pageIndex of pageIndexes) {
@@ -201,6 +292,7 @@ export function assertPdfPageGraphWithinLimits(
 
     if (dictionary) {
       for (const [, value] of dictionary.entries()) {
+        recordEntry();
         enqueue(value, entry.depth + 1);
       }
       continue;
@@ -208,6 +300,7 @@ export function assertPdfPageGraphWithinLimits(
 
     if (entry.object instanceof PDFArray) {
       for (let index = 0; index < entry.object.size(); index += 1) {
+        recordEntry();
         enqueue(entry.object.get(index), entry.depth + 1);
       }
     }

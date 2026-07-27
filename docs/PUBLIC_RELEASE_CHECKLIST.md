@@ -3,8 +3,8 @@
 This checklist separates technical release gates from contribution and history
 governance. The repository is already public. First-party rights confirmation
 and the public-tree, build, product, repository-setting, and publication
-sections block the official 0.4.0 release. Section 3 records known historical
-governance debt but does not block 0.4.0. Qualified legal review and a recorded
+sections block the official 0.4.1 release. Section 3 records known historical
+governance debt but does not block 0.4.1. Qualified legal review and a recorded
 CLA workflow are strongly recommended governance work, but they block merging
 external contributions rather than publication of first-party code. Until
 those contribution controls are active, maintainers may discuss external
@@ -46,14 +46,14 @@ or environment secrets.
 - [ ] Verify the README describes current behavior and limitations rather than
       roadmap claims.
 
-## 3. Historical governance debt (not a 0.4.0 release gate)
+## 3. Historical governance debt (not a 0.4.1 release gate)
 
 The already-public reachable history contains a retired `MEMORY.md` file in
 nine older commits. It is absent from the current tree, remains ignored, and
 the complete reachable-history scan found no secret. Rewriting that history
 cannot retract prior public exposure and would invalidate existing clones,
 tags, and source links. A clean-root or history rewrite is therefore not a
-0.4.0 release prerequisite.
+0.4.1 release prerequisite.
 
 If the owner later elects to rewrite public history, all of the following
 become mandatory preconditions for that separate operation:
@@ -71,7 +71,7 @@ become mandatory preconditions for that separate operation:
 - [ ] Compare the rewritten candidate tree byte-for-byte with the validated
       release tree and document every intentional difference.
 
-Do not force-update public refs as part of the 0.4.0 release unless that
+Do not force-update public refs as part of the 0.4.1 release unless that
 separate approval, backup, review, and verification process has completed.
 
 ## 4. Build and supply-chain gate
@@ -85,8 +85,11 @@ npm run typecheck
 npm audit --audit-level=low
 npm audit --omit=dev --audit-level=low
 npm run assets:check
+npm run licenses:check
 npm test
 npm run --silent sbom > /tmp/pagelea-sbom.cdx.json
+npm run --silent sbom > /tmp/pagelea-sbom-repeat.cdx.json
+cmp --silent /tmp/pagelea-sbom.cdx.json /tmp/pagelea-sbom-repeat.cdx.json
 git diff --check
 ```
 
@@ -96,8 +99,8 @@ git diff --check
 - [ ] Confirm the locked Tesseract patch applies during both `npm ci` and
       `npm ci --omit=dev`, and its focused bootstrap, cancellation,
       runtime-crash, and image-loading tests pass.
-- [ ] Confirm the SBOM parses as CycloneDX and identifies the root licence as
-      `AGPL-3.0-or-later`.
+- [ ] Confirm the two SBOM generations are identical, parse as CycloneDX, and
+      identify the root licence as `AGPL-3.0-or-later`.
 - [ ] Record source SHA, SBOM SHA-256, build artifact SHA-256, and quality-gate
       URL.
 
@@ -134,11 +137,11 @@ git diff --check
 
 ## 7. Publication
 
-- [ ] Publish the exact validated 0.4.0 commit and tag to the already-public
+- [ ] Publish the exact validated 0.4.1 commit and tag to the already-public
       repository without rewriting historical refs.
 - [ ] Verify the repository name, description, topics, homepage, licence
       detection, and default branch.
-- [ ] Publish the exact SBOM and checksums with the 0.4.0 release.
+- [ ] Publish the exact Linux CI SBOM and checksums with the 0.4.1 release.
 - [ ] Verify anonymous clone, clean install, build, tests, issue templates,
       security advisory flow, website source link, and licence detection.
 - [ ] Announce the free/open-source commitments and limitations without

@@ -59,7 +59,7 @@ test("server-renders the finished Pagelea homepage", async () => {
   assert.match(html, /Free forever/);
   assert.match(
     html,
-    /github\.com\/inochisrl\/pagelea\.com\/tree\/v0\.4\.0/i,
+    /github\.com\/inochisrl\/pagelea\.com\/tree\/v0\.4\.1/i,
     "every rendered page must expose the exact corresponding source tag",
   );
   assert.doesNotMatch(html, /Pagelea Account|Pagelea Desktop/i);
