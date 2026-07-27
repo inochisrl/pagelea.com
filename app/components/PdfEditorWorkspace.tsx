@@ -37,10 +37,12 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ChangeEvent,
   type DragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -49,6 +51,17 @@ import {
 } from "react";
 
 import { trackAnalyticsEvent } from "../lib/analytics-client";
+import {
+  awaitBounded,
+  createAbortError,
+} from "../lib/abort";
+import {
+  EDITOR_FONT_OPTIONS,
+  editorFontCss,
+  editorFontLabel,
+  inferTextDirection,
+  matchExtractedPdfFont,
+} from "../lib/pdf-font-matching";
 import {
   pageDisplaySize,
   type EditorFontFamily,
@@ -69,6 +82,13 @@ import {
   type ExtractedPdfTextFragment,
   type ExtractedPdfTextPage,
 } from "../lib/pdf-text-extraction";
+import {
+  createLocalPdfOcrSession,
+  removeOcrFragmentsOverlappingNative,
+  type LocalOcrLanguage,
+  type LocalOcrProgress,
+  type LocalPdfOcrSession,
+} from "../lib/pdf-local-ocr";
 import {
   disposePdfPreview,
   loadPdfPreview,
@@ -91,6 +111,9 @@ import {
   type TextContentBudget,
 } from "../lib/pdf-security-limits";
 import PdfPageCanvas from "./PdfPageCanvas";
+import PrivateRewriteControls, {
+  type PrivateRewriteStatus,
+} from "./PrivateRewriteControls";
 import styles from "./PdfEditorWorkspace.module.css";
 
 type EditorPhase = "idle" | "loading" | "ready" | "exporting";
@@ -153,6 +176,13 @@ type TextLayerState = {
   message: string;
 };
 
+type PrivateRewriteState = {
+  key: string;
+  message: string;
+  progress: number;
+  status: PrivateRewriteStatus;
+};
+
 type SampledTextColors = {
   background: string;
   foreground: string;
@@ -161,6 +191,75 @@ type SampledTextColors = {
 const HISTORY_LIMIT = 60;
 const DEFAULT_PAGE_WIDTH = 595.28;
 const DEFAULT_PAGE_HEIGHT = 841.89;
+
+function uniqueTextFragments(
+  fragments: readonly ExtractedPdfTextFragment[],
+): ExtractedPdfTextFragment[] {
+  const seenIds = new Set<string>();
+  return fragments.filter((fragment) => {
+    if (seenIds.has(fragment.id)) return false;
+    seenIds.add(fragment.id);
+    return true;
+  });
+}
+
+/**
+ * Builds one text layer from independently completed native and OCR scans.
+ *
+ * Each argument may already contain a previously merged page. Filtering by
+ * `origin` makes the result independent of which scan completed first, while
+ * stable fragment IDs prevent retries from creating duplicate hit targets.
+ */
+export function mergeExtractedTextPageSources(
+  nativePage: ExtractedPdfTextPage | null,
+  ocrPage: ExtractedPdfTextPage | null,
+): ExtractedPdfTextPage {
+  const metadataPage = nativePage ?? ocrPage;
+  if (!metadataPage) {
+    throw new Error("A native or OCR text page is required.");
+  }
+
+  const nativeFragments = uniqueTextFragments(
+    (nativePage?.fragments ?? []).filter(
+      (fragment) => fragment.origin === "native",
+    ),
+  );
+  const ocrFragments = uniqueTextFragments(
+    (ocrPage?.fragments ?? []).filter(
+      (fragment) => fragment.origin === "ocr",
+    ),
+  );
+
+  return {
+    ...metadataPage,
+    language:
+      ocrPage?.language ?? nativePage?.language ?? metadataPage.language,
+    fragments: [
+      ...nativeFragments,
+      ...removeOcrFragmentsOverlappingNative(
+        ocrFragments,
+        nativeFragments,
+      ),
+    ],
+  };
+}
+
+function privateRewriteProgressLabel(
+  progress: LocalOcrProgress,
+): string {
+  switch (progress.stage) {
+    case "rendering":
+      return "Preparing this page";
+    case "loading-engine":
+      return "Starting the local OCR engine";
+    case "loading-language":
+      return "Loading the local language model";
+    case "recognizing":
+      return "Recognizing text locally";
+    case "complete":
+      return "Local recognition complete";
+  }
+}
 
 const TOOL_ITEMS: Array<{
   id: EditorTool;
@@ -189,40 +288,17 @@ function clamp(value: number, minimum = 0, maximum = 1) {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
+function roundEditorNumber(value: number, decimalPlaces = 1) {
+  const factor = 10 ** decimalPlaces;
+  return Math.round(value * factor) / factor;
+}
+
 function normalizedQuarterTurn(value: number): 0 | 90 | 180 | 270 {
   const normalized = ((Math.round(value / 90) * 90) % 360 + 360) % 360;
   if (normalized === 90 || normalized === 180 || normalized === 270) {
     return normalized;
   }
   return 0;
-}
-
-function inferFontFamily(fragment: ExtractedPdfTextFragment): EditorFontFamily {
-  const label =
-    `${fragment.resolvedFontName ?? ""} ${fragment.fontFamily} ${fragment.fontName}`.toLowerCase();
-  if (/courier|mono|typewriter|consolas/.test(label)) return "Courier";
-  if (
-    /(?:^|[^a-z])times|georgia|garamond|palatino/.test(label) ||
-    fragment.fontFamily.trim().toLowerCase() === "serif"
-  ) {
-    return "Times";
-  }
-  return "Helvetica";
-}
-
-function inferredFontStyle(fragment: ExtractedPdfTextFragment) {
-  const label =
-    `${fragment.resolvedFontName ?? ""} ${fragment.fontFamily} ${fragment.fontName}`.toLowerCase();
-  return {
-    bold: fragment.bold || /bold|black|heavy|semibold|demi/.test(label),
-    italic: fragment.italic || /italic|oblique|slant/.test(label),
-  };
-}
-
-function editorFontCss(family: EditorFontFamily | undefined) {
-  if (family === "Times") return '"Times New Roman", Times, serif';
-  if (family === "Courier") return '"Courier New", Courier, monospace';
-  return "Helvetica, Arial, sans-serif";
 }
 
 function textFragmentGeometry(
@@ -270,7 +346,7 @@ function textFragmentGeometry(
       ),
       width: normalizedWidth,
       height: normalizedHeight,
-      rotation: fragment.rotation ?? 0,
+      rotation: roundEditorNumber(fragment.rotation ?? 0),
     };
   }
 
@@ -288,7 +364,13 @@ function textFragmentGeometry(
     0.004,
     1 - y,
   );
-  return { x, y, width, height, rotation: fragment.rotation ?? 0 };
+  return {
+    x,
+    y,
+    width,
+    height,
+    rotation: roundEditorNumber(fragment.rotation ?? 0),
+  };
 }
 
 function textBaselineFactor(
@@ -416,19 +498,55 @@ function sampleTextColors(
     const sampleTop = Math.max(0, top - band);
     const sampleRight = Math.min(canvas.width, right + band);
     const sampleBottom = Math.min(canvas.height, bottom + band);
-    const image = context.getImageData(
+    const regionWidth = sampleRight - sampleLeft;
+    const regionHeight = sampleBottom - sampleTop;
+    const sampleScale = Math.min(
+      1,
+      128 / Math.max(regionWidth, regionHeight),
+    );
+    const sampleCanvas = document.createElement("canvas");
+    sampleCanvas.width = Math.max(
+      1,
+      Math.ceil(regionWidth * sampleScale),
+    );
+    sampleCanvas.height = Math.max(
+      1,
+      Math.ceil(regionHeight * sampleScale),
+    );
+    const sampleContext = sampleCanvas.getContext("2d", {
+      willReadFrequently: true,
+    });
+    if (!sampleContext) return fallback;
+    sampleContext.drawImage(
+      canvas,
       sampleLeft,
       sampleTop,
-      sampleRight - sampleLeft,
-      sampleBottom - sampleTop,
+      regionWidth,
+      regionHeight,
+      0,
+      0,
+      sampleCanvas.width,
+      sampleCanvas.height,
+    );
+    const image = sampleContext.getImageData(
+      0,
+      0,
+      sampleCanvas.width,
+      sampleCanvas.height,
     );
     const backgroundSamples: RgbSample[] = [];
     const insideSamples: RgbSample[] = [];
-    const totalPixels = image.width * image.height;
-    const stride = Math.max(1, Math.ceil(Math.sqrt(totalPixels / 9_000)));
+    const insideLeft =
+      ((left - sampleLeft) / regionWidth) * image.width;
+    const insideTop =
+      ((top - sampleTop) / regionHeight) * image.height;
+    const insideRight =
+      ((right - sampleLeft) / regionWidth) * image.width;
+    const insideBottom =
+      ((bottom - sampleTop) / regionHeight) * image.height;
 
-    for (let y = 0; y < image.height; y += stride) {
-      for (let x = 0; x < image.width; x += stride) {
+    for (let y = 0; y < image.height; y += 1) {
+      for (let x = 0; x < image.width; x += 1) {
         const offset = (y * image.width + x) * 4;
         if (image.data[offset + 3] < 180) continue;
         const sample: RgbSample = [
@@ -436,15 +554,26 @@ function sampleTextColors(
           image.data[offset + 1],
           image.data[offset + 2],
         ];
-        const pageX = sampleLeft + x;
-        const pageY = sampleTop + y;
-        if (pageX < left || pageX >= right || pageY < top || pageY >= bottom) {
+        if (
+          x < insideLeft ||
+          x >= insideRight ||
+          y < insideTop ||
+          y >= insideBottom
+        ) {
           backgroundSamples.push(sample);
         } else {
           insideSamples.push(sample);
         }
       }
     }
+    sampleContext.clearRect(
+      0,
+      0,
+      sampleCanvas.width,
+      sampleCanvas.height,
+    );
+    sampleCanvas.width = 1;
+    sampleCanvas.height = 1;
 
     const background = dominantColor(backgroundSamples, [255, 255, 255]);
     const inkCandidates = insideSamples.filter(
@@ -481,12 +610,6 @@ function isEditableTarget(target: EventTarget | null) {
     target instanceof HTMLSelectElement ||
     (target instanceof HTMLElement && target.isContentEditable)
   );
-}
-
-function createAbortError() {
-  const error = new Error("The operation was aborted.");
-  error.name = "AbortError";
-  return error;
 }
 
 function imageFileToDataUrl(file: File, signal: AbortSignal) {
@@ -652,7 +775,11 @@ export default function PdfEditorWorkspace({
   const previewRef = useRef<PdfPreviewDocument | null>(null);
   const loadTokenRef = useRef(0);
   const loadAbortRef = useRef<AbortController | null>(null);
+  const exportAbortRef = useRef<AbortController | null>(null);
   const imageAbortRef = useRef<AbortController | null>(null);
+  const ocrAbortRef = useRef<AbortController | null>(null);
+  const ocrSessionRef = useRef<LocalPdfOcrSession | null>(null);
+  const ocrSessionLanguageRef = useRef<LocalOcrLanguage | null>(null);
   const interactionRef = useRef<Interaction | null>(null);
   const canvasTouchPointsRef = useRef<Map<number, Point>>(new Map());
   const canvasTouchGestureRef = useRef<CanvasTouchGesture | null>(null);
@@ -720,17 +847,100 @@ export default function PdfEditorWorkspace({
   const [textPages, setTextPages] = useState<
     Record<string, ExtractedPdfTextPage>
   >({});
+  const [ocrLanguage, setOcrLanguage] =
+    useState<LocalOcrLanguage>("eng+ita");
+  const [privateRewrite, setPrivateRewrite] =
+    useState<PrivateRewriteState>({
+      key: "",
+      message: "Ready to recognize this page locally.",
+      progress: 0,
+      status: "idle",
+    });
   const textPagesRef = useRef(textPages);
+  const nativeTextPageKeysRef = useRef<Set<string>>(new Set());
   const textPageBudgetsRef = useRef<
     Record<string, TextContentBudget>
   >({});
 
+  function disposeLocalOcrSession(): Promise<void> {
+    ocrAbortRef.current?.abort();
+    ocrAbortRef.current = null;
+    const session = ocrSessionRef.current;
+    ocrSessionRef.current = null;
+    ocrSessionLanguageRef.current = null;
+    return session
+      ? session.dispose().catch(() => undefined)
+      : Promise.resolve();
+  }
+
   function clearTextPages() {
+    void disposeLocalOcrSession();
     const emptyPages: Record<string, ExtractedPdfTextPage> = {};
+    nativeTextPageKeysRef.current.clear();
     textPageBudgetsRef.current = {};
     textPagesRef.current = emptyPages;
     setTextPages(emptyPages);
+    setPrivateRewrite({
+      key: "",
+      message: "Ready to recognize this page locally.",
+      progress: 0,
+      status: "idle",
+    });
   }
+
+  const storeTextPage = useCallback(
+    (
+      pageKey: string,
+      pageId: string,
+      textPage: ExtractedPdfTextPage,
+    ): string | null => {
+      const currentPages = textPagesRef.current;
+      const pageKeyPrefix = `${pageId}:`;
+      const replacedKeys = Object.keys(currentPages).filter((key) =>
+        key.startsWith(pageKeyPrefix),
+      );
+      const currentBudgets = textPageBudgetsRef.current;
+      const replacementBudget = getTextContentBudget(
+        textPage.fragments.map((fragment) => fragment.text),
+      );
+      const budgetIssue = getReplacementTextContentLimitIssue(
+        currentBudgets,
+        replacedKeys,
+        replacementBudget,
+      );
+      if (budgetIssue) {
+        return describePdfSecurityLimitIssue(budgetIssue);
+      }
+
+      const retainedPages = Object.fromEntries(
+        Object.entries(currentPages).filter(
+          ([key]) => !key.startsWith(pageKeyPrefix),
+        ),
+      );
+      const retainedBudgets = Object.fromEntries(
+        Object.entries(currentBudgets).filter(
+          ([key]) => !key.startsWith(pageKeyPrefix),
+        ),
+      );
+      for (const key of nativeTextPageKeysRef.current) {
+        if (key.startsWith(pageKeyPrefix) && key !== pageKey) {
+          nativeTextPageKeysRef.current.delete(key);
+        }
+      }
+      const nextPages = {
+        ...retainedPages,
+        [pageKey]: textPage,
+      };
+      textPageBudgetsRef.current = {
+        ...retainedBudgets,
+        [pageKey]: replacementBudget,
+      };
+      textPagesRef.current = nextPages;
+      setTextPages(nextPages);
+      return null;
+    },
+    [],
+  );
 
   useEffect(() => {
     snapshotRef.current = snapshot;
@@ -740,7 +950,12 @@ export default function PdfEditorWorkspace({
     () => () => {
       loadTokenRef.current += 1;
       loadAbortRef.current?.abort();
+      exportAbortRef.current?.abort();
       imageAbortRef.current?.abort();
+      ocrAbortRef.current?.abort();
+      if (ocrSessionRef.current) {
+        void ocrSessionRef.current.dispose().catch(() => undefined);
+      }
       if (previewRef.current) {
         void disposePdfPreview(previewRef.current).catch(() => undefined);
       }
@@ -795,6 +1010,23 @@ export default function PdfEditorWorkspace({
       ),
     [activeTextPage, replacedSourceTextIds],
   );
+  const recognizedOcrLines =
+    activeTextPage?.fragments.filter(
+      (fragment) => fragment.origin === "ocr",
+    ).length ?? 0;
+  const activePrivateRewrite =
+    privateRewrite.key === activeTextKey
+      ? privateRewrite
+      : {
+          key: activeTextKey,
+          message: recognizedOcrLines
+            ? "Text on this page was recognized locally."
+            : "Ready to recognize this page locally.",
+          progress: recognizedOcrLines ? 100 : 0,
+          status: recognizedOcrLines
+            ? ("ready" as const)
+            : ("idle" as const),
+        };
   const activeTextLayerStatus: TextLayerStatus = activeTextPage
     ? activeTextPage.fragments.some(
         (fragment) =>
@@ -956,7 +1188,7 @@ export default function PdfEditorWorkspace({
       return;
     }
 
-    if (activeTextPage) return;
+    if (nativeTextPageKeysRef.current.has(activeTextKey)) return;
 
     const controller = new AbortController();
     queueMicrotask(() => {
@@ -993,53 +1225,26 @@ export default function PdfEditorWorkspace({
       })
       .then((textPage) => {
         if (controller.signal.aborted) return;
-        const currentPages = textPagesRef.current;
-        const pageKeyPrefix = `${activePage.id}:`;
-        const replacedKeys = Object.keys(currentPages).filter(
-          (key) => key.startsWith(pageKeyPrefix),
+        const mergedTextPage = mergeExtractedTextPageSources(
+          textPage,
+          textPagesRef.current[activeTextKey] ?? null,
         );
-        const currentBudgets = textPageBudgetsRef.current;
-        const replacementBudget = getTextContentBudget(
-          textPage.fragments.map((fragment) => fragment.text),
+        const storageIssue = storeTextPage(
+          activeTextKey,
+          activePage.id,
+          mergedTextPage,
         );
-        const budgetIssue = getReplacementTextContentLimitIssue(
-          currentBudgets,
-          replacedKeys,
-          replacementBudget,
-        );
-        if (budgetIssue) {
-          const message =
-            describePdfSecurityLimitIssue(budgetIssue);
+        if (storageIssue) {
           setTextLayerState({
             key: activeTextKey,
             status: "error",
-            message,
+            message: storageIssue,
           });
-          setError(message);
+          setError(storageIssue);
           return;
         }
-
-        const retainedPages = Object.fromEntries(
-          Object.entries(currentPages).filter(
-            ([key]) => !key.startsWith(pageKeyPrefix),
-          ),
-        );
-        const retainedBudgets = Object.fromEntries(
-          Object.entries(currentBudgets).filter(
-            ([key]) => !key.startsWith(pageKeyPrefix),
-          ),
-        );
-        const nextPages = {
-          ...retainedPages,
-          [activeTextKey]: textPage,
-        };
-        textPageBudgetsRef.current = {
-          ...retainedBudgets,
-          [activeTextKey]: replacementBudget,
-        };
-        textPagesRef.current = nextPages;
-        setTextPages(nextPages);
-        const hasText = textPage.fragments.some(
+        nativeTextPageKeysRef.current.add(activeTextKey);
+        const hasText = mergedTextPage.fragments.some(
           (fragment) =>
             fragment.hasGeometry && fragment.text.trim().length > 0,
         );
@@ -1047,7 +1252,7 @@ export default function PdfEditorWorkspace({
           key: activeTextKey,
           status: hasText ? "ready" : "empty",
           message: hasText
-            ? `${textPage.fragments.length} text blocks found`
+            ? `${mergedTextPage.fragments.length} text blocks found`
             : "No selectable text found",
         });
       })
@@ -1079,10 +1284,264 @@ export default function PdfEditorWorkspace({
   }, [
     activePage,
     activeTextKey,
-    activeTextPage,
     phase,
     previewDocument,
+    storeTextPage,
   ]);
+
+  useEffect(
+    () => () => {
+      const controller = ocrAbortRef.current;
+      controller?.abort();
+      if (ocrAbortRef.current === controller) {
+        ocrAbortRef.current = null;
+      }
+    },
+    [activeTextKey],
+  );
+
+  function localOcrSession(
+    language: LocalOcrLanguage,
+  ): LocalPdfOcrSession {
+    if (
+      ocrSessionRef.current &&
+      ocrSessionLanguageRef.current === language
+    ) {
+      return ocrSessionRef.current;
+    }
+
+    const previous = ocrSessionRef.current;
+    ocrSessionRef.current = createLocalPdfOcrSession({ language });
+    ocrSessionLanguageRef.current = language;
+    if (previous) {
+      void previous.dispose().catch(() => undefined);
+    }
+    return ocrSessionRef.current;
+  }
+
+  function changeOcrLanguage(language: LocalOcrLanguage) {
+    if (language === ocrLanguage) return;
+    void disposeLocalOcrSession();
+    setOcrLanguage(language);
+    setPrivateRewrite({
+      key: activeTextKey,
+      message: "Language changed. Ready to scan this page locally.",
+      progress: recognizedOcrLines ? 100 : 0,
+      status: recognizedOcrLines ? "ready" : "idle",
+    });
+  }
+
+  function cancelPrivateRewrite() {
+    ocrAbortRef.current?.abort();
+    setPrivateRewrite((current) =>
+      current.status === "recognizing"
+        ? {
+            ...current,
+            message: "Cancelling local recognition…",
+          }
+        : current,
+    );
+  }
+
+  async function recognizeActivePageLocally() {
+    if (
+      !activePage ||
+      activePage.sourcePageIndex === null ||
+      !activeTextKey ||
+      !previewDocument ||
+      activePrivateRewrite.status === "recognizing"
+    ) {
+      return;
+    }
+
+    const page = activePage;
+    const pageKey = activeTextKey;
+    const pageIndex = page.sourcePageIndex;
+    if (pageIndex === null) return;
+    const previousOcrLines =
+      textPagesRef.current[pageKey]?.fragments.filter(
+        (fragment) => fragment.origin === "ocr",
+      ).length ?? 0;
+    ocrAbortRef.current?.abort();
+    const controller = new AbortController();
+    ocrAbortRef.current = controller;
+    const isCurrentRecognition = () =>
+      ocrAbortRef.current === controller;
+    const recognitionStartedAt = Date.now();
+    let lastOcrProgress = -5;
+    let lastOcrProgressLabel = "";
+    setError("");
+    setPrivateRewrite({
+      key: pageKey,
+      message: "Preparing this page",
+      progress: 0,
+      status: "recognizing",
+    });
+    setProgress({
+      value: 0,
+      label: "Private Rewrite · preparing this page locally",
+    });
+
+    try {
+      const pdfPage = await awaitBounded(
+        previewDocument.getPage(pageIndex + 1),
+        {
+          abortMessage: "Local OCR was aborted.",
+          onLateResolve: (latePage) => {
+            try {
+              latePage.cleanup();
+            } catch {
+              // The preview may already have been disposed.
+            }
+          },
+          signal: controller.signal,
+          timeoutMessage:
+            "Local OCR could not prepare this page before the runtime limit.",
+          timeoutMs:
+            PDF_SECURITY_LIMITS.maxOcrRuntimeMilliseconds,
+        },
+      );
+      let ocrPage: ExtractedPdfTextPage;
+      try {
+        if (!isCurrentRecognition()) return;
+        const remainingRuntime = Math.max(
+          1,
+          PDF_SECURITY_LIMITS.maxOcrRuntimeMilliseconds -
+            (Date.now() - recognitionStartedAt),
+        );
+        ocrPage = await localOcrSession(ocrLanguage).recognizePage(
+          pdfPage,
+          {
+            documentId:
+              previewDocument.fingerprints.find(Boolean) ??
+              "pagelea-document",
+            onProgress: (ocrProgress) => {
+              if (
+                controller.signal.aborted ||
+                !isCurrentRecognition()
+              ) {
+                return;
+              }
+              const label = privateRewriteProgressLabel(ocrProgress);
+              const value = Math.round(ocrProgress.progress * 100);
+              if (
+                label === lastOcrProgressLabel &&
+                value < lastOcrProgress + 5
+              ) {
+                return;
+              }
+              lastOcrProgress = value;
+              lastOcrProgressLabel = label;
+              setPrivateRewrite((current) =>
+                current.key === pageKey
+                  ? {
+                      ...current,
+                      message: label,
+                      progress: value,
+                    }
+                  : current,
+              );
+            },
+            pageIndex,
+            pageNumber: pageIndex + 1,
+            rotation: normalizedQuarterTurn(
+              page.sourceRotation + page.rotation,
+            ),
+            signal: controller.signal,
+            sourceRotation: normalizedQuarterTurn(page.sourceRotation),
+            timeoutMs: remainingRuntime,
+          },
+        );
+      } finally {
+        try {
+          pdfPage.cleanup();
+        } catch {
+          // The preview may have been replaced while OCR was active.
+        }
+      }
+      if (controller.signal.aborted || !isCurrentRecognition()) return;
+
+      const mergedPage = mergeExtractedTextPageSources(
+        textPagesRef.current[pageKey] ?? null,
+        ocrPage,
+      );
+      const storageIssue = storeTextPage(
+        pageKey,
+        page.id,
+        mergedPage,
+      );
+      if (storageIssue) throw new Error(storageIssue);
+
+      const recognizedLines = mergedPage.fragments.filter(
+        (fragment) => fragment.origin === "ocr",
+      ).length;
+      const nativeLines = mergedPage.fragments.filter(
+        (fragment) => fragment.origin === "native",
+      ).length;
+      const message = recognizedLines
+        ? `${recognizedLines} text lines recognized locally.`
+        : nativeLines
+          ? "No additional scanned text was found."
+          : "No text was recognized on this page.";
+      setPrivateRewrite({
+        key: pageKey,
+        message,
+        progress: 100,
+        status: "ready",
+      });
+      setTextLayerState({
+        key: pageKey,
+        message,
+        status:
+          mergedPage.fragments.length > 0 ? "ready" : "empty",
+      });
+      setProgress({
+        value: 100,
+        label: `Private Rewrite · ${message}`,
+      });
+      setTool("edit-text");
+    } catch (cause) {
+      if (!isCurrentRecognition()) return;
+      const aborted =
+        controller.signal.aborted ||
+        (cause instanceof Error && cause.name === "AbortError");
+      if (aborted) {
+        setPrivateRewrite({
+          key: pageKey,
+          message: previousOcrLines
+            ? "Recognition cancelled. Previous local results kept."
+            : "Local recognition cancelled.",
+          progress: previousOcrLines ? 100 : 0,
+          status: previousOcrLines ? "ready" : "idle",
+        });
+        setProgress({
+          value: previousOcrLines ? 100 : 0,
+          label: "Private Rewrite · recognition cancelled",
+        });
+        return;
+      }
+
+      const message =
+        cause instanceof Error
+          ? cause.message
+          : "Local text recognition failed.";
+      setPrivateRewrite({
+        key: pageKey,
+        message,
+        progress: 0,
+        status: "error",
+      });
+      setError(message);
+      setProgress({
+        value: 0,
+        label: "Private Rewrite · recognition failed",
+      });
+    } finally {
+      if (ocrAbortRef.current === controller) {
+        ocrAbortRef.current = null;
+      }
+    }
+  }
 
   function remember(previous: EditorSnapshot) {
     setPast((items) => [...items.slice(-(HISTORY_LIMIT - 1)), previous]);
@@ -1310,6 +1769,7 @@ export default function PdfEditorWorkspace({
       return;
     }
 
+    exportAbortRef.current?.abort();
     loadAbortRef.current?.abort();
     const loadController = new AbortController();
     loadAbortRef.current = loadController;
@@ -1478,6 +1938,7 @@ export default function PdfEditorWorkspace({
   }
 
   async function createBlankDocument() {
+    exportAbortRef.current?.abort();
     loadAbortRef.current?.abort();
     loadAbortRef.current = null;
     loadTokenRef.current += 1;
@@ -1727,6 +2188,7 @@ export default function PdfEditorWorkspace({
         text: "Type here",
         fontSize: 18,
         fontFamily: "Helvetica",
+        direction: "ltr",
         color: "#17221e",
         bold: false,
         italic: false,
@@ -1761,6 +2223,7 @@ export default function PdfEditorWorkspace({
         text: signatureName.trim(),
         fontSize: 34,
         fontFamily: "Helvetica",
+        direction: inferTextDirection(signatureName.trim()),
         color: "#17221e",
         bold: false,
         italic: true,
@@ -1801,7 +2264,22 @@ export default function PdfEditorWorkspace({
     const display = pageDisplaySize(activePage);
     const geometry = textFragmentGeometry(fragment, display);
     const colors = sampleTextColors(surfaceRef.current, fragment);
-    const fontStyle = inferredFontStyle(fragment);
+    const matchedFont = matchExtractedPdfFont(fragment);
+    const sourceTextBase = {
+      id: fragment.id,
+      pageIndex: activePage.sourcePageIndex,
+      originalText: fragment.text,
+      fontName: fragment.fontName,
+      detectedFontFamily: fragment.fontFamily,
+      detectedFontName: matchedFont.sourceName,
+      fontMatchConfidence: matchedFont.confidence,
+      originalX: geometry.x,
+      originalY: geometry.y,
+      originalWidth: geometry.width,
+      originalHeight: geometry.height,
+      originalRotation: geometry.rotation,
+      originalBackgroundColor: colors.background,
+    };
     const element: TextEditorElement = {
       id: makeId("source-text"),
       pageId: activePage.id,
@@ -1809,26 +2287,30 @@ export default function PdfEditorWorkspace({
       ...geometry,
       opacity: 1,
       text: fragment.text,
-      fontSize: clamp(fragment.fontSize ?? 12, 4, 240),
+      fontSize: clamp(
+        roundEditorNumber(fragment.fontSize ?? 12),
+        4,
+        240,
+      ),
       baselineFactor: textBaselineFactor(fragment, display),
-      fontFamily: inferFontFamily(fragment),
+      fontFamily: matchedFont.family,
+      direction: inferTextDirection(fragment.text, fragment.direction),
       color: colors.foreground,
-      bold: fontStyle.bold,
-      italic: fontStyle.italic,
+      bold: matchedFont.bold,
+      italic: matchedFont.italic,
       backgroundColor: colors.background,
-      sourceText: {
-        id: fragment.id,
-        pageIndex: activePage.sourcePageIndex,
-        originalText: fragment.text,
-        fontName: fragment.fontName,
-        detectedFontFamily: fragment.fontFamily,
-        originalX: geometry.x,
-        originalY: geometry.y,
-        originalWidth: geometry.width,
-        originalHeight: geometry.height,
-        originalRotation: geometry.rotation,
-        originalBackgroundColor: colors.background,
-      },
+      sourceText:
+        fragment.origin === "ocr"
+          ? {
+              ...sourceTextBase,
+              kind: "ocr",
+              language: activeTextPage?.language ?? "und",
+              confidence: fragment.confidence ?? 0,
+            }
+          : {
+              ...sourceTextBase,
+              kind: "native",
+            },
     };
 
     const before = snapshotRef.current;
@@ -2387,10 +2869,40 @@ export default function PdfEditorWorkspace({
       setError(describePdfSecurityLimitIssue(limitIssue));
       return;
     }
+    const { planPdfEditorFontRuns } = await import(
+      "../lib/pdf-editor-fonts"
+    );
+    for (const element of currentSnapshot.elements) {
+      if (element.type !== "text" || !element.text) continue;
+      try {
+        planPdfEditorFontRuns(element.text, {
+          bold: element.bold,
+          family: element.fontFamily ?? "Helvetica",
+          italic: element.italic,
+        });
+      } catch (cause) {
+        setSelectedId(element.id);
+        if (compactLayout) setOpenPanel("properties");
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "This text cannot be exported with the supported font set.",
+        );
+        return;
+      }
+    }
+    exportAbortRef.current?.abort();
+    const exportController = new AbortController();
+    exportAbortRef.current = exportController;
     setPhase("exporting");
     setError("");
     trackAnalyticsEvent({ event: "tool_start", tool: analyticsTool });
     try {
+      setProgress({
+        value: 1,
+        label: "Releasing local OCR memory",
+      });
+      await disposeLocalOcrSession();
       const { exportEditedPdf } = await import(
         "../lib/pdf-editor-export"
       );
@@ -2399,19 +2911,39 @@ export default function PdfEditorWorkspace({
         pages: currentSnapshot.pages,
         elements: currentSnapshot.elements,
         filename: documentName,
-        onProgress: (value, label) => setProgress({ value, label }),
+        onProgress: (value, label) => {
+          if (exportAbortRef.current === exportController) {
+            setProgress({ value, label });
+          }
+        },
+        signal: exportController.signal,
       });
+      if (
+        exportController.signal.aborted ||
+        exportAbortRef.current !== exportController
+      ) {
+        return;
+      }
       downloadResult(result.blob, result.filename);
       setProgress({ value: 100, label: "Download ready" });
       trackAnalyticsEvent({ event: "tool_complete", tool: analyticsTool });
     } catch (cause) {
+      if (
+        exportController.signal.aborted ||
+        exportAbortRef.current !== exportController
+      ) {
+        return;
+      }
       trackAnalyticsEvent({ event: "tool_error", tool: analyticsTool });
       setError(
         cause instanceof Error ? cause.message : "The PDF could not export.",
       );
     } finally {
-      restoreExportFocusRef.current = restoreExportFocus;
-      setPhase("ready");
+      if (exportAbortRef.current === exportController) {
+        exportAbortRef.current = null;
+        restoreExportFocusRef.current = restoreExportFocus;
+        setPhase("ready");
+      }
     }
   }
 
@@ -2469,13 +3001,15 @@ export default function PdfEditorWorkspace({
 
     let content;
     if (element.type === "text") {
-      const textStyle = {
+      const textStyle: CSSProperties = {
         color: element.color,
         background: element.backgroundColor || "transparent",
-        fontFamily: editorFontCss(element.fontFamily),
+        direction: element.direction ?? "ltr",
+        fontFamily: editorFontCss(element.fontFamily, element.text),
         fontSize: `${Math.max(7, element.fontSize * pixelScale)}px`,
         fontStyle: element.italic ? "italic" : "normal",
-        fontWeight: element.bold ? 800 : 500,
+        fontWeight: element.bold ? 700 : 400,
+        textAlign: element.direction === "rtl" ? "right" : "left",
       };
       content =
         editingTextId === element.id ? (
@@ -2490,13 +3024,17 @@ export default function PdfEditorWorkspace({
               PDF_SECURITY_LIMITS.maxEditorTextCharactersPerElement
             }
             onBlur={finishTextEditing}
-            onChange={(event) =>
+            onChange={(event) => {
+              const text = event.currentTarget.value;
               updateElement(
                 element.id,
-                { text: event.currentTarget.value },
+                {
+                  direction: inferTextDirection(text),
+                  text,
+                },
                 false,
-              )
-            }
+              );
+            }}
             onFocus={(event) => event.currentTarget.select()}
             onKeyDown={(event) => {
               if (
@@ -2786,14 +3324,14 @@ export default function PdfEditorWorkspace({
                   ? "Open a PDF and make it official."
                   : mode === "organize"
                     ? "Put every page in the right place."
-                  : "Click existing PDF text and rewrite it."}
+                  : "Rewrite native or scanned PDF text."}
             </h1>
             <p className={styles.startCopy}>
               {phase === "loading"
                 ? "Pages are being prepared in this browser."
                 : mode === "organize"
                   ? "Drop a PDF here to reorder, rotate, remove, or add pages. Nothing is uploaded."
-                  : "Drop a text-based PDF here. Pagelea detects editable text locally, and nothing is uploaded."}
+                  : "Drop any PDF here. Pagelea detects native text and Private Rewrite can recognize English or Italian scans locally."}
             </p>
             <div className={styles.startActions}>
               <button
@@ -2849,6 +3387,7 @@ export default function PdfEditorWorkspace({
       } ${immersive ? styles.immersive : ""}`}
       data-pages-collapsed={pagesCollapsed}
       data-properties-collapsed={propertiesCollapsed}
+      data-tool={tool}
     >
       <h1
         className={styles.srOnly}
@@ -3293,6 +3832,11 @@ export default function PdfEditorWorkspace({
                   className={styles.textDetectionBadge}
                   data-status={activeTextLayerStatus}
                   role="status"
+                  title={
+                    textLayerState.key === activeTextKey
+                      ? textLayerState.message
+                      : undefined
+                  }
                 >
                   {activeTextLayerStatus === "loading" ? (
                     <LoaderCircle size={13} />
@@ -3370,26 +3914,50 @@ export default function PdfEditorWorkspace({
                 </div>
               </div>
             </div>
-            <p className={styles.hint}>
-              {tool === "edit-text"
-                ? activeTextLayerStatus === "loading"
-                  ? "Finding editable text on this page…"
-                  : activeTextLayerStatus === "empty"
-                    ? "No selectable text was found. Scanned text cannot be rewritten yet; use Add text to place new content."
-                    : activeTextLayerStatus === "error"
-                      ? "Text detection failed on this page. You can still use Add text and Whiteout."
-                      : "Click an outlined text block, then type directly on the page."
-                : tool === "select"
-                ? "Select an element to move, resize, or style it."
-                : tool === "draw" ||
-                    (tool === "signature" && signatureMode === "draw")
-                  ? "Drag directly on the page."
-                  : tool === "image" ||
-                      (tool === "signature" &&
-                        signatureMode === "upload")
-                    ? "Click the page to place the image."
-                    : "Click or drag on the page to add the element."}
-            </p>
+            <div className={styles.hint}>
+              <p className={styles.hintText}>
+                {tool === "edit-text"
+                  ? activePrivateRewrite.status === "recognizing"
+                    ? activePrivateRewrite.message
+                    : activeTextLayerStatus === "loading"
+                      ? "Finding editable text on this page…"
+                      : activeTextLayerStatus === "empty"
+                        ? "No selectable text found. Run Private Rewrite to recognize scanned text without uploading the PDF."
+                        : activeTextLayerStatus === "error"
+                          ? "Native text detection failed. Private Rewrite can still recognize the rendered page locally."
+                          : "Click an outlined text block, then type directly on the page."
+                  : tool === "select"
+                    ? "Select an element to move, resize, or style it."
+                    : tool === "draw" ||
+                        (tool === "signature" &&
+                          signatureMode === "draw")
+                      ? "Drag directly on the page."
+                      : tool === "image" ||
+                          (tool === "signature" &&
+                            signatureMode === "upload")
+                        ? "Click the page to place the image."
+                        : "Click or drag on the page to add the element."}
+              </p>
+              {tool === "edit-text" ? (
+                <PrivateRewriteControls
+                  disabled={
+                    !activePage ||
+                    activePage.sourcePageIndex === null ||
+                    phase !== "ready"
+                  }
+                  language={ocrLanguage}
+                  message={activePrivateRewrite.message}
+                  onCancel={cancelPrivateRewrite}
+                  onLanguageChange={changeOcrLanguage}
+                  onRecognize={() =>
+                    void recognizeActivePageLocally()
+                  }
+                  progress={activePrivateRewrite.progress}
+                  recognizedLines={recognizedOcrLines}
+                  status={activePrivateRewrite.status}
+                />
+              ) : null}
+            </div>
           </div>
         </section>
 
@@ -3508,17 +4076,68 @@ export default function PdfEditorWorkspace({
               {selectedElement.type === "text" ? (
                 <>
                   {selectedElement.sourceText ? (
-                    <div className={styles.sourceTextNotice}>
-                      <TextCursorInput size={17} />
-                      <div>
-                        <strong>Editing original PDF text</strong>
-                        <span>
-                          Compatible PDF text stays searchable and vector.
-                          Complex content is safely flattened so the old words
-                          are never left underneath.
-                        </span>
+                    <>
+                      <div className={styles.sourceTextNotice}>
+                        <TextCursorInput size={17} />
+                        <div>
+                          <strong>
+                            {selectedElement.sourceText.kind === "ocr"
+                              ? "Editing locally recognized text"
+                              : "Editing original PDF text"}
+                          </strong>
+                          <span>
+                            {selectedElement.sourceText.kind === "ocr"
+                              ? "Pagelea repairs the recognized pixels, securely flattens this source page, then writes supported searchable Unicode text."
+                              : "Compatible PDF text stays searchable and vector. Complex content is safely flattened so the old words are never left underneath."}
+                          </span>
+                        </div>
                       </div>
-                    </div>
+                      <dl
+                        aria-label="Source text details"
+                        className={styles.sourceTextMetadata}
+                      >
+                        <div>
+                          <dt>Source font</dt>
+                          <dd>
+                            {selectedElement.sourceText.detectedFontName ||
+                              selectedElement.sourceText
+                                .detectedFontFamily ||
+                              selectedElement.sourceText.fontName ||
+                              "Unknown"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Font match</dt>
+                          <dd>
+                            {selectedElement.sourceText
+                              .fontMatchConfidence ?? "generic"}
+                            {" · "}
+                            {editorFontLabel(
+                              selectedElement.fontFamily ?? "Helvetica",
+                            )}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Direction</dt>
+                          <dd>
+                            {selectedElement.direction === "rtl"
+                              ? "Right to left"
+                              : "Left to right"}
+                          </dd>
+                        </div>
+                        {selectedElement.sourceText.kind === "ocr" ? (
+                          <div>
+                            <dt>Recognition</dt>
+                            <dd>
+                              {Math.round(
+                                selectedElement.sourceText.confidence,
+                              )}
+                              % · {selectedElement.sourceText.language}
+                            </dd>
+                          </div>
+                        ) : null}
+                      </dl>
+                    </>
                   ) : null}
                   <label className={styles.field}>
                     <span>Content</span>
@@ -3530,11 +4149,13 @@ export default function PdfEditorWorkspace({
                         PDF_SECURITY_LIMITS.maxEditorTextCharactersPerElement
                       }
                       onBlur={finishInspectorEditing}
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        const text = event.target.value;
                         updateSelectedContinuously({
-                          text: event.target.value,
-                        })
-                      }
+                          direction: inferTextDirection(text),
+                          text,
+                        });
+                      }}
                       onFocus={() =>
                         beginInspectorEditing(selectedElement.id)
                       }
@@ -3554,9 +4175,14 @@ export default function PdfEditorWorkspace({
                       }
                       value={selectedElement.fontFamily ?? "Helvetica"}
                     >
-                      <option value="Helvetica">Helvetica</option>
-                      <option value="Times">Times</option>
-                      <option value="Courier">Courier</option>
+                      {EDITOR_FONT_OPTIONS.map((option) => (
+                        <option
+                          key={option.family}
+                          value={option.family}
+                        >
+                          {option.label}
+                        </option>
+                      ))}
                     </select>
                   </label>
                   <div className={styles.fieldRow}>
@@ -3574,8 +4200,11 @@ export default function PdfEditorWorkspace({
                         onFocus={() =>
                           beginInspectorEditing(selectedElement.id)
                         }
+                        step={0.1}
                         type="number"
-                        value={selectedElement.fontSize}
+                        value={roundEditorNumber(
+                          selectedElement.fontSize,
+                        )}
                       />
                     </label>
                     <label className={styles.field}>
@@ -3792,8 +4421,11 @@ export default function PdfEditorWorkspace({
                   onFocus={() =>
                     beginInspectorEditing(selectedElement.id)
                   }
+                  step={0.1}
                   type="number"
-                  value={selectedElement.rotation ?? 0}
+                  value={roundEditorNumber(
+                    selectedElement.rotation ?? 0,
+                  )}
                 />
               </label>
 

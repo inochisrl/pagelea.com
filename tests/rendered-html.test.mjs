@@ -59,7 +59,7 @@ test("server-renders the finished Pagelea homepage", async () => {
   assert.match(html, /Free forever/);
   assert.match(
     html,
-    /github\.com\/inochisrl\/pagelea\.com\/tree\/v0\.3\.1/i,
+    /github\.com\/inochisrl\/pagelea\.com\/tree\/v0\.4\.0/i,
     "every rendered page must expose the exact corresponding source tag",
   );
   assert.doesNotMatch(html, /Pagelea Account|Pagelea Desktop/i);
@@ -92,20 +92,20 @@ test("uses the canonical Pagelea origin even with hostile forwarded headers", as
 });
 
 test("publishes complete public information and legal pages", async () => {
-  for (const [pathname, marker] of [
-    ["/about", "Operator and contact"],
-    ["/help", "Contact support"],
-    ["/security", "Responsible reporting"],
-    ["/terms", "Free community service"],
-    ["/privacy", "Controller and contact"],
-    ["/cookies", "__cf_bm"],
+  for (const [pathname, marker, updated] of [
+    ["/about", "Operator and contact", "27 July 2026"],
+    ["/help", "Contact support", "27 July 2026"],
+    ["/security", "Responsible reporting", "27 July 2026"],
+    ["/terms", "Free community service", "26 July 2026"],
+    ["/privacy", "Controller and contact", "27 July 2026"],
+    ["/cookies", "__cf_bm", "26 July 2026"],
   ]) {
     const response = await render(pathname);
     assert.equal(response.status, 200, pathname);
     const html = await response.text();
     assert.match(html, new RegExp(marker, "i"), pathname);
     assert.match(html, /Last updated/i, pathname);
-    assert.match(html, /26 July 2026/i, pathname);
+    assert.match(html, new RegExp(updated, "i"), pathname);
     if (pathname !== "/cookies") {
       assert.match(html, /hello@pagelea\.com/i, pathname);
     }
@@ -174,10 +174,13 @@ test("server-renders the dedicated visual PDF editor", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>PDF Editor · Pagelea<\/title>/i);
-  assert.match(html, /Click existing PDF text and rewrite it/);
-  assert.match(html, /Pagelea detects editable text locally/);
+  assert.match(html, /Rewrite native or scanned PDF text\./);
+  assert.match(
+    html,
+    /Pagelea detects native text and Private Rewrite can recognize English or Italian scans locally\./,
+  );
+  assert.match(html, /Local only/);
   assert.match(html, /Start blank/);
-  assert.match(html, /nothing is uploaded/i);
   assert.doesNotMatch(html, /Pagelea workspace/);
   assert.doesNotMatch(html, /How it works/i);
   assert.doesNotMatch(html, /Related tools/i);

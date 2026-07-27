@@ -108,7 +108,6 @@ test("maps PDF.js text to normalized top-left geometry", () => {
   assert.equal(fragment.fontSize, 10);
   assert.equal(fragment.color, "#336699");
   assert.equal(fragment.rotation, 0);
-  assert.deepEqual(fragment.markedContentIds, ["paragraph-1"]);
   assert.equal(fragment.x, 100 / 600);
   assert.equal(fragment.y, 92 / 800);
   assert.equal(fragment.width, 100 / 600);
@@ -152,7 +151,7 @@ test("keeps IDs stable while mapping all page quarter turns", () => {
   assert.equal(rotated.height, 100 / 600);
 });
 
-test("skips marked-content records and preserves nested IDs", () => {
+test("skips deeply nested marked-content records in constant space", () => {
   const nestedContent = {
     ...textContent,
     items: [
@@ -174,10 +173,30 @@ test("skips marked-content records and preserves nested IDs", () => {
 
   assert.equal(page.fragments.length, 1);
   assert.equal(page.fragments[0].itemIndex, 2);
-  assert.deepEqual(page.fragments[0].markedContentIds, [
-    "outer",
-    "inner",
-  ]);
+});
+
+test("marked-content depth cannot multiply per-fragment memory", () => {
+  const depth = 5_000;
+  const page = extraction.mapPdfTextContent(
+    {
+      ...textContent,
+      items: [
+        ...Array.from({ length: depth }, () => ({
+          type: "beginMarkedContentProps",
+          id: "ignored",
+        })),
+        textContent.items[1],
+      ],
+    },
+    viewport(0),
+    {
+      pageIndex: 2,
+      documentId: "fixture",
+    },
+  );
+
+  assert.equal(page.fragments.length, 1);
+  assert.equal(page.fragments[0].itemIndex, depth);
 });
 
 test("rejects oversized text content before mapping fragments", () => {

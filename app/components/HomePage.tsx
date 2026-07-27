@@ -45,8 +45,8 @@ const CATEGORY_TONES: Record<string, string> = {
 const GUIDES = [
   {
     number: "01",
-    title: "Edit a PDF without wrestling the page",
-    copy: "Click text that is already in the document, rewrite it inline, then add notes or a signature.",
+    title: "Rewrite native or scanned PDF text",
+    copy: "Click existing text or recognize an English or Italian scan locally, then rewrite the selected line.",
     slug: "pdf-editor",
     tone: "mint",
   },
@@ -117,9 +117,9 @@ export function HomePage() {
                 <em>without uploading it.</em>
               </h1>
               <p className={`${styles.heroLead} reveal`}>
-                Pagelea rewrites supported existing text and handles seven more
-                everyday PDF jobs locally in your browser. Free and open source,
-                with no account or artificial task quota.
+                Pagelea rewrites supported native and scanned text, then
+                handles seven more everyday PDF jobs locally in your browser.
+                Free and open source, with no account or artificial task quota.
               </p>
               <div className={`${styles.heroActions} reveal`}>
                 <Link className="button-primary" href="/tools/pdf-editor">

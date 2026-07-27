@@ -57,12 +57,12 @@ function createRequestNonce(): string {
 function createContentSecurityPolicy(nonce: string): string {
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}'`,
+    `script-src 'self' 'nonce-${nonce}' 'wasm-unsafe-eval'`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
     "connect-src 'self'",
-    "worker-src 'self' blob:",
+    "worker-src 'self'",
     "base-uri 'none'",
     "object-src 'none'",
     "frame-ancestors 'none'",

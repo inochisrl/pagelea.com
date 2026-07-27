@@ -8,8 +8,14 @@ import {
   PDFRef,
   PDFStream,
   StandardFonts,
+  TextRenderingMode,
   degrees,
+  popGraphicsState,
+  pushGraphicsState,
   rgb,
+  setLineWidth,
+  setStrokingRgbColor,
+  setTextRenderingMode,
   type PDFFont,
   type PDFImage,
   type PDFObject,
@@ -18,8 +24,10 @@ import {
 } from "pdf-lib";
 import { Inflate } from "pako";
 
+import { throwIfAborted } from "./abort";
 import {
   pageDisplaySize,
+  type EditorFontFamily,
   type EditorElement,
   type EditorPage,
   type ImageEditorElement,
@@ -28,6 +36,12 @@ import {
   type RectEditorElement,
   type TextEditorElement,
 } from "./pdf-editor-types";
+import {
+  PdfEditorFontError,
+  createPdfEditorFontEmbedder,
+  planPdfEditorFontRuns,
+  type PdfEditorFontAssetLoader,
+} from "./pdf-editor-fonts";
 import {
   assertPdfPageGraphWithinLimits,
   assertPdfPageTreeWithinLimits,
@@ -39,6 +53,7 @@ import {
 } from "./pdf-preview";
 import {
   describePdfSecurityLimitIssue,
+  getEditorRasterBudgetLimitIssue,
   getEditorSnapshotLimitIssue,
   getFileLimitIssue,
   getImageDimensionLimitIssue,
@@ -46,6 +61,7 @@ import {
   getPageCountLimitIssue,
   getTextFieldLimitIssue,
   PDF_SECURITY_LIMITS,
+  type EditorRasterBudget,
   type PdfSecurityLimitIssue,
 } from "./pdf-security-limits";
 
@@ -54,7 +70,10 @@ export interface ExportEditedPdfInput {
   pages: EditorPage[];
   elements: EditorElement[];
   filename: string;
+  /** Test/SSR injection; browsers load only the fixed same-origin allowlist. */
+  fontAssetLoader?: PdfEditorFontAssetLoader;
   onProgress?: (value: number, label: string) => void;
+  signal?: AbortSignal;
 }
 
 export interface ExportEditedPdfResult {
@@ -62,17 +81,22 @@ export interface ExportEditedPdfResult {
   filename: string;
 }
 
-interface EmbeddedFonts {
-  Helvetica: EmbeddedFontVariants;
-  Times: EmbeddedFontVariants;
-  Courier: EmbeddedFontVariants;
+type StandardEditorFontFamily = "Helvetica" | "Times" | "Courier";
+
+interface PreparedPdfTextRun {
+  direction: "ltr" | "rtl";
+  font: PDFFont;
+  syntheticBold: boolean;
+  syntheticItalic: boolean;
+  text: string;
 }
 
-interface EmbeddedFontVariants {
-  regular: PDFFont;
-  bold: PDFFont;
-  italic: PDFFont;
-  boldItalic: PDFFont;
+interface ExportFontManager {
+  dispose(): void;
+  prepareRuns(
+    element: TextEditorElement,
+    text: string,
+  ): Promise<readonly PreparedPdfTextRun[]>;
 }
 
 interface PageDrawingTransform {
@@ -97,6 +121,7 @@ interface VisualRect {
 
 interface RasterizedSourcePage {
   bytes: Uint8Array;
+  canvasPixelCount: number;
   width: number;
   height: number;
 }
@@ -990,6 +1015,9 @@ function rewrittenSourcePageContents(
   sourcePage: PDFPage,
   edits: readonly TextEditorElement[],
 ): Uint8Array | null {
+  if (edits.some((edit) => edit.sourceText?.kind !== "native")) {
+    return null;
+  }
   if (sourcePageHasFormXObjects(sourcePage)) return null;
   const contents = decodedPageContents(sourcePage);
   if (!contents?.byteLength) return null;
@@ -1075,17 +1103,23 @@ function samePdfReference(first: PDFRef, second: PDFRef): boolean {
   );
 }
 
-function objectDirectlyReferences(
+function pdfReferenceKey(reference: PDFRef): string {
+  return `${reference.objectNumber}:${reference.generationNumber}`;
+}
+
+function candidateReferencesInObject(
   root: PDFObject,
-  target: PDFRef,
-): boolean {
+  candidateKeys: ReadonlySet<string>,
+): Set<string> {
+  const references = new Set<string>();
   const stack: PDFObject[] = [root];
   const seen = new Set<PDFObject>();
   while (stack.length > 0) {
     const object = stack.pop();
     if (!object) continue;
     if (object instanceof PDFRef) {
-      if (samePdfReference(object, target)) return true;
+      const key = pdfReferenceKey(object);
+      if (candidateKeys.has(key)) references.add(key);
       continue;
     }
     if (seen.has(object)) continue;
@@ -1099,29 +1133,54 @@ function objectDirectlyReferences(
       stack.push(...object.values());
     }
   }
-  return false;
+  return references;
 }
 
 function deleteUnreferencedObjects(
   document: PDFDocument,
   candidates: readonly PDFRef[],
 ): void {
-  const pending = [...candidates];
-  let deleted = true;
-  while (pending.length > 0 && deleted) {
-    deleted = false;
-    for (let index = pending.length - 1; index >= 0; index -= 1) {
-      const candidate = pending[index];
-      const inUse = document.context
-        .enumerateIndirectObjects()
-        .some(([, object]) =>
-          objectDirectlyReferences(object, candidate),
-        );
-      if (!inUse && document.context.delete(candidate)) {
-        pending.splice(index, 1);
-        deleted = true;
-      }
+  if (candidates.length === 0) return;
+
+  const candidateByKey = new Map(
+    candidates.map((reference) => [
+      pdfReferenceKey(reference),
+      reference,
+    ]),
+  );
+  const candidateKeys = new Set(candidateByKey.keys());
+  const candidateEdges = new Map<string, Set<string>>();
+  const liveCandidates = new Set<string>();
+
+  /*
+   * Build the candidate reference graph once. References from ordinary
+   * objects are live roots; references between obsolete objects are followed
+   * only when their owner is live. This safely removes unreferenced cycles
+   * without rescanning the complete PDF once per old content stream.
+   */
+  for (const [owner, object] of document.context.enumerateIndirectObjects()) {
+    const ownerKey = pdfReferenceKey(owner);
+    const references = candidateReferencesInObject(object, candidateKeys);
+    if (candidateKeys.has(ownerKey)) {
+      candidateEdges.set(ownerKey, references);
+    } else {
+      for (const reference of references) liveCandidates.add(reference);
     }
+  }
+
+  const pending = [...liveCandidates];
+  while (pending.length > 0) {
+    const key = pending.pop();
+    if (!key) continue;
+    for (const reference of candidateEdges.get(key) ?? []) {
+      if (liveCandidates.has(reference)) continue;
+      liveCandidates.add(reference);
+      pending.push(reference);
+    }
+  }
+
+  for (const [key, reference] of candidateByKey) {
+    if (!liveCandidates.has(key)) document.context.delete(reference);
   }
 }
 
@@ -1324,120 +1383,609 @@ function elementPdfRotation(
   return transform.pageRotation - editorClockwiseDegrees;
 }
 
-function fontForElement(
-  element: TextEditorElement,
-  fonts: EmbeddedFonts,
-): PDFFont {
-  const family = fonts[element.fontFamily ?? "Helvetica"];
-  if (element.bold && element.italic) return family.boldItalic;
-  if (element.bold) return family.bold;
-  if (element.italic) return family.italic;
-  return family.regular;
+const GRAPHEME_SEGMENTER = new Intl.Segmenter("und", {
+  granularity: "grapheme",
+});
+const WORD_SEGMENTER = new Intl.Segmenter("und", {
+  granularity: "word",
+});
+
+export function splitTextGraphemes(value: string): string[] {
+  return [...GRAPHEME_SEGMENTER.segment(value)].map(
+    (segment) => segment.segment,
+  );
 }
 
-function printableCharacter(character: string): string {
-  const codePoint = character.codePointAt(0) ?? 0;
-  const escaped = JSON.stringify(character);
-  return `${escaped} (U+${codePoint.toString(16).toUpperCase().padStart(4, "0")})`;
-}
+const EDITOR_FONT_FAMILIES = new Set<EditorFontFamily>([
+  "Helvetica",
+  "Times",
+  "Courier",
+  "Noto Sans",
+  "Noto Sans Condensed",
+  "Noto Serif",
+  "Noto Sans Mono",
+]);
+const STANDARD_EDITOR_FONT_FAMILIES =
+  new Set<StandardEditorFontFamily>([
+    "Helvetica",
+    "Times",
+    "Courier",
+  ]);
+const WIN_ANSI_EXTRA = new Set([
+  0x0152,
+  0x0153,
+  0x0160,
+  0x0161,
+  0x0178,
+  0x017d,
+  0x017e,
+  0x0192,
+  0x02c6,
+  0x02dc,
+  0x2013,
+  0x2014,
+  0x2018,
+  0x2019,
+  0x201a,
+  0x201c,
+  0x201d,
+  0x201e,
+  0x2020,
+  0x2021,
+  0x2022,
+  0x2026,
+  0x2030,
+  0x2039,
+  0x203a,
+  0x20ac,
+  0x2122,
+]);
 
-function safeText(
-  value: string,
-  font: PDFFont,
-  elementId: string,
-): string {
-  const normalized = value
+function normalizeEditorText(value: string): string {
+  return value
     .replace(/\r\n?/g, "\n")
-    .replace(/\t/g, "    ");
-
-  const unsupported = new Set<string>();
-  for (const character of normalized) {
-    if (character === "\n") continue;
-    try {
-      font.encodeText(character);
-    } catch {
-      unsupported.add(character);
-    }
-  }
-
-  if (unsupported.size) {
-    const characters = [...unsupported];
-    const preview = characters
-      .slice(0, 8)
-      .map(printableCharacter)
-      .join(", ");
-    const remainder =
-      characters.length > 8
-        ? ` and ${characters.length - 8} more`
-        : "";
-    throw new Error(
-      `Text annotation "${elementId}" contains characters that the built-in PDF font cannot encode: ${preview}${remainder}. Replace those characters with Latin/WinAnsi text before exporting.`,
-    );
-  }
-
-  return normalized;
+    .replace(/\t/g, "    ")
+    .normalize("NFC");
 }
 
-function breakWord(word: string, font: PDFFont, size: number, width: number) {
-  if (font.widthOfTextAtSize(word, size) <= width) return [word];
-
-  const fragments: string[] = [];
-  let fragment = "";
-  for (const character of word) {
-    const candidate = fragment + character;
-    if (fragment && font.widthOfTextAtSize(candidate, size) > width) {
-      fragments.push(fragment);
-      fragment = character;
-    } else {
-      fragment = candidate;
+function isWinAnsiText(value: string): boolean {
+  for (const character of value) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    if (
+      character === "\n" ||
+      (codePoint >= 0x20 && codePoint <= 0x7e) ||
+      (codePoint >= 0xa0 && codePoint <= 0xff) ||
+      WIN_ANSI_EXTRA.has(codePoint)
+    ) {
+      continue;
     }
+    return false;
   }
-  if (fragment) fragments.push(fragment);
-  return fragments;
+  return true;
 }
 
-function wrapText(
-  text: string,
-  font: PDFFont,
-  size: number,
-  width: number,
-  elementId: string,
-): string[] {
-  if (width <= 0) return [];
+function standardFontName(
+  family: StandardEditorFontFamily,
+  bold: boolean,
+  italic: boolean,
+): StandardFonts {
+  if (family === "Times") {
+    if (bold && italic) return StandardFonts.TimesRomanBoldItalic;
+    if (bold) return StandardFonts.TimesRomanBold;
+    if (italic) return StandardFonts.TimesRomanItalic;
+    return StandardFonts.TimesRoman;
+  }
+  if (family === "Courier") {
+    if (bold && italic) return StandardFonts.CourierBoldOblique;
+    if (bold) return StandardFonts.CourierBold;
+    if (italic) return StandardFonts.CourierOblique;
+    return StandardFonts.Courier;
+  }
+  if (bold && italic) return StandardFonts.HelveticaBoldOblique;
+  if (bold) return StandardFonts.HelveticaBold;
+  if (italic) return StandardFonts.HelveticaOblique;
+  return StandardFonts.Helvetica;
+}
 
-  const lines: string[] = [];
-  for (const paragraph of safeText(text, font, elementId).split("\n")) {
-    if (!paragraph) {
-      lines.push("");
+function createExportFontManager(
+  document: PDFDocument,
+  loadAsset?: PdfEditorFontAssetLoader,
+  signal?: AbortSignal,
+): ExportFontManager {
+  const standardFonts = new Map<string, Promise<PDFFont>>();
+  const customFonts = createPdfEditorFontEmbedder(document, {
+    loadAsset,
+  });
+
+  const embedStandard = (
+    family: StandardEditorFontFamily,
+    bold: boolean,
+    italic: boolean,
+  ): Promise<PDFFont> => {
+    const name = standardFontName(family, bold, italic);
+    const cached = standardFonts.get(name);
+    if (cached) return cached;
+    const pending = document.embedFont(name);
+    standardFonts.set(name, pending);
+    return pending;
+  };
+
+  return {
+    dispose(): void {
+      standardFonts.clear();
+      customFonts.clear();
+    },
+    async prepareRuns(
+      element: TextEditorElement,
+      value: string,
+    ): Promise<readonly PreparedPdfTextRun[]> {
+      const text = normalizeEditorText(value);
+      const family = element.fontFamily ?? "Helvetica";
+      if (!EDITOR_FONT_FAMILIES.has(family)) {
+        throw new Error(
+          `Text annotation "${element.id}" uses an unsupported font family.`,
+        );
+      }
+
+      if (
+        STANDARD_EDITOR_FONT_FAMILIES.has(
+          family as StandardEditorFontFamily,
+        ) &&
+        isWinAnsiText(text)
+      ) {
+        return [
+          {
+            direction: element.direction ?? "ltr",
+            font: await embedStandard(
+              family as StandardEditorFontFamily,
+              element.bold,
+              element.italic,
+            ),
+            syntheticBold: false,
+            syntheticItalic: false,
+            text,
+          },
+        ];
+      }
+
+      const planned = planPdfEditorFontRuns(text, {
+        bold: element.bold,
+        family,
+        italic: element.italic,
+      });
+      const groupedByAsset = new Map<
+        string,
+        {
+          asset: (typeof planned)[number]["asset"];
+          text: string;
+        }
+      >();
+      for (const run of planned) {
+        const group = groupedByAsset.get(run.asset.id);
+        if (group) {
+          group.text += run.text;
+        } else {
+          groupedByAsset.set(run.asset.id, {
+            asset: run.asset,
+            text: run.text,
+          });
+        }
+      }
+      const embeddedByAsset = new Map(
+        await Promise.all(
+          [...groupedByAsset.entries()].map(
+            async ([assetId, group]) =>
+              [
+                assetId,
+                await customFonts.embed(
+                  group.asset,
+                  group.text,
+                  signal,
+                ),
+              ] as const,
+          ),
+        ),
+      );
+      return planned.map((run) => {
+        const font = embeddedByAsset.get(run.asset.id);
+        if (!font) {
+          throw new Error(
+            `Bundled font "${run.asset.id}" was not prepared for export.`,
+          );
+        }
+        return {
+          direction: element.direction ?? run.direction,
+          font,
+          syntheticBold: run.syntheticBold,
+          syntheticItalic: run.syntheticItalic,
+          text: run.text,
+        };
+      });
+    },
+  };
+}
+
+interface PreparedPdfTextUnit
+  extends Omit<PreparedPdfTextRun, "text"> {
+  text: string;
+}
+
+interface PreparedPdfTextLine {
+  direction: "ltr" | "rtl";
+  runs: PreparedPdfTextRun[];
+  width: number;
+}
+
+function samePreparedTextRunStyle(
+  first: PreparedPdfTextRun,
+  second: PreparedPdfTextRun,
+): boolean {
+  return (
+    first.font === second.font &&
+    first.direction === second.direction &&
+    first.syntheticBold === second.syntheticBold &&
+    first.syntheticItalic === second.syntheticItalic
+  );
+}
+
+function appendPreparedTextRun(
+  runs: PreparedPdfTextRun[],
+  run: PreparedPdfTextRun,
+): void {
+  if (!run.text) return;
+  const previous = runs.at(-1);
+  if (previous && samePreparedTextRunStyle(previous, run)) {
+    previous.text += run.text;
+    return;
+  }
+  runs.push({ ...run });
+}
+
+function groupPreparedTextRuns(
+  source: readonly PreparedPdfTextRun[],
+): PreparedPdfTextRun[] {
+  const runs: PreparedPdfTextRun[] = [];
+  for (const run of source) appendPreparedTextRun(runs, run);
+  return runs;
+}
+
+function groupTextLineRuns(
+  units: readonly PreparedPdfTextUnit[],
+  direction: "ltr" | "rtl",
+  fontSize: number,
+): PreparedPdfTextLine {
+  const runs = groupPreparedTextRuns(units);
+  return {
+    direction,
+    runs,
+    width: runs.reduce(
+      (width, run) =>
+        width + run.font.widthOfTextAtSize(run.text, fontSize),
+      0,
+    ),
+  };
+}
+
+function trimTrailingWhitespace(
+  units: readonly PreparedPdfTextUnit[],
+): PreparedPdfTextUnit[] {
+  let end = units.length;
+  while (
+    end > 0 &&
+    units[end - 1].text !== "\n" &&
+    /^\s+$/u.test(units[end - 1].text)
+  ) {
+    end -= 1;
+  }
+  return units.slice(0, end);
+}
+
+interface PreparedPdfTextToken {
+  runs: PreparedPdfTextRun[];
+  whitespace: boolean;
+}
+
+function preparedTextWidth(
+  units: readonly PreparedPdfTextUnit[],
+  direction: "ltr" | "rtl",
+  fontSize: number,
+): number {
+  return groupTextLineRuns(units, direction, fontSize).width;
+}
+
+function preparedTextRunsWidth(
+  runs: readonly PreparedPdfTextRun[],
+  fontSize: number,
+): number {
+  return groupPreparedTextRuns(runs).reduce(
+    (width, run) =>
+      width + run.font.widthOfTextAtSize(run.text, fontSize),
+    0,
+  );
+}
+
+function preparedTextCandidateWidth(
+  units: readonly PreparedPdfTextUnit[],
+  runs: readonly PreparedPdfTextRun[],
+  fontSize: number,
+): number {
+  return preparedTextRunsWidth([...units, ...runs], fontSize);
+}
+
+function* preparedTextParagraphs(
+  runs: readonly PreparedPdfTextRun[],
+): Generator<PreparedPdfTextRun[]> {
+  let paragraph: PreparedPdfTextRun[] = [];
+  for (const run of runs) {
+    let start = 0;
+    while (start < run.text.length) {
+      const newline = run.text.indexOf("\n", start);
+      const end = newline < 0 ? run.text.length : newline;
+      appendPreparedTextRun(paragraph, {
+        ...run,
+        text: run.text.slice(start, end),
+      });
+      if (newline < 0) break;
+      yield paragraph;
+      paragraph = [];
+      start = newline + 1;
+    }
+    if (run.text.endsWith("\n")) {
+      // The final empty paragraph is emitted below or completed by later runs.
+      continue;
+    }
+  }
+  yield paragraph;
+}
+
+function* segmentPreparedTextTokens(
+  runs: readonly PreparedPdfTextRun[],
+): Generator<PreparedPdfTextToken> {
+  const text = runs.map((run) => run.text).join("");
+  if (!text) return;
+
+  let runIndex = 0;
+  let runOffset = 0;
+  let codeUnitOffset = 0;
+  let pendingRuns: PreparedPdfTextRun[] = [];
+  let pendingHasWord = false;
+
+  const takeRunsThrough = (end: number): PreparedPdfTextRun[] => {
+    const taken: PreparedPdfTextRun[] = [];
+    while (runIndex < runs.length && codeUnitOffset < end) {
+      const run = runs[runIndex];
+      const available = run.text.length - runOffset;
+      if (available <= 0) {
+        runIndex += 1;
+        runOffset = 0;
+        continue;
+      }
+      const length = Math.min(available, end - codeUnitOffset);
+      appendPreparedTextRun(taken, {
+        ...run,
+        text: run.text.slice(runOffset, runOffset + length),
+      });
+      runOffset += length;
+      codeUnitOffset += length;
+      if (runOffset === run.text.length) {
+        runIndex += 1;
+        runOffset = 0;
+      }
+    }
+    return taken;
+  };
+
+  for (const segment of WORD_SEGMENTER.segment(text)) {
+    const segmentEnd = segment.index + segment.segment.length;
+    const segmentRuns = takeRunsThrough(segmentEnd);
+    if (codeUnitOffset < segmentEnd || segmentRuns.length === 0) continue;
+
+    if (/^\s+$/u.test(segment.segment)) {
+      if (pendingRuns.length > 0) {
+        yield { runs: pendingRuns, whitespace: false };
+        pendingRuns = [];
+        pendingHasWord = false;
+      }
+      yield { runs: segmentRuns, whitespace: true };
       continue;
     }
 
-    let current = "";
-    for (const originalWord of paragraph.split(/\s+/)) {
-      for (const word of breakWord(originalWord, font, size, width)) {
-        const candidate = current ? `${current} ${word}` : word;
-        if (
-          current &&
-          font.widthOfTextAtSize(candidate, size) > width
-        ) {
-          lines.push(current);
-          current = word;
-        } else {
-          current = candidate;
-        }
+    if (segment.isWordLike && pendingHasWord) {
+      yield { runs: pendingRuns, whitespace: false };
+      pendingRuns = [];
+      pendingHasWord = false;
+    }
+    for (const run of segmentRuns) {
+      appendPreparedTextRun(pendingRuns, run);
+    }
+    if (segment.isWordLike) pendingHasWord = true;
+  }
+
+  if (codeUnitOffset < text.length) {
+    for (const run of takeRunsThrough(text.length)) {
+      appendPreparedTextRun(pendingRuns, run);
+    }
+  }
+  if (pendingRuns.length > 0) {
+    yield { runs: pendingRuns, whitespace: false };
+  }
+}
+
+function* preparedTextUnits(
+  runs: readonly PreparedPdfTextRun[],
+): Generator<PreparedPdfTextUnit> {
+  for (const run of runs) {
+    for (const segment of GRAPHEME_SEGMENTER.segment(run.text)) {
+      yield {
+        direction: run.direction,
+        font: run.font,
+        syntheticBold: run.syntheticBold,
+        syntheticItalic: run.syntheticItalic,
+        text: segment.segment,
+      };
+    }
+  }
+}
+
+function materializePreparedTextUnits(
+  runs: readonly PreparedPdfTextRun[],
+): PreparedPdfTextUnit[] {
+  return [...preparedTextUnits(runs)];
+}
+
+interface PreparedPdfTextChunk {
+  hasMore: boolean;
+  units: PreparedPdfTextUnit[];
+}
+
+function* splitOversizedPreparedTextToken(
+  token: PreparedPdfTextToken,
+  direction: "ltr" | "rtl",
+  fontSize: number,
+  maximumWidth: number,
+): Generator<PreparedPdfTextChunk> {
+  const iterator = preparedTextUnits(token.runs);
+  const buffer: PreparedPdfTextUnit[] = [];
+  let exhausted = false;
+
+  const fill = (length: number): void => {
+    while (!exhausted && buffer.length < length) {
+      const next = iterator.next();
+      if (next.done) {
+        exhausted = true;
+      } else {
+        buffer.push(next.value);
       }
     }
-    lines.push(current);
+  };
+
+  while (true) {
+    fill(1);
+    if (buffer.length === 0) return;
+
+    let fitting = 1;
+    if (
+      preparedTextWidth(
+        buffer.slice(0, 1),
+        direction,
+        fontSize,
+      ) <= maximumWidth
+    ) {
+      let probeLength = 2;
+      while (true) {
+        fill(probeLength);
+        const available = Math.min(buffer.length, probeLength);
+        if (available <= fitting) break;
+        if (
+          preparedTextWidth(
+            buffer.slice(0, available),
+            direction,
+            fontSize,
+          ) <= maximumWidth
+        ) {
+          fitting = available;
+          if (exhausted && fitting === buffer.length) break;
+          probeLength *= 2;
+          continue;
+        }
+
+        let lower = fitting + 1;
+        let upper = available - 1;
+        while (lower <= upper) {
+          const midpoint = Math.floor((lower + upper) / 2);
+          if (
+            preparedTextWidth(
+              buffer.slice(0, midpoint),
+              direction,
+              fontSize,
+            ) <= maximumWidth
+          ) {
+            fitting = midpoint;
+            lower = midpoint + 1;
+          } else {
+            upper = midpoint - 1;
+          }
+        }
+        break;
+      }
+    }
+
+    const units = buffer.splice(0, fitting);
+    fill(1);
+    const hasMore = buffer.length > 0;
+    yield { hasMore, units };
+    if (!hasMore) return;
+  }
+}
+
+export function wrapPreparedTextRuns(
+  runs: readonly PreparedPdfTextRun[],
+  fontSize: number,
+  maximumWidth: number,
+  maximumLines = Number.POSITIVE_INFINITY,
+): PreparedPdfTextLine[] {
+  if (maximumWidth <= 0 || maximumLines <= 0) return [];
+
+  const direction =
+    runs.find((run) => run.direction === "rtl")?.direction ?? "ltr";
+  const lines: PreparedPdfTextLine[] = [];
+
+  for (const paragraph of preparedTextParagraphs(runs)) {
+    const tokens = segmentPreparedTextTokens(paragraph);
+    let line: PreparedPdfTextUnit[] = [];
+
+    const flushLine = () => {
+      const trimmed = trimTrailingWhitespace(line);
+      lines.push(groupTextLineRuns(trimmed, direction, fontSize));
+      line = [];
+      return lines.length >= maximumLines;
+    };
+
+    for (const token of tokens) {
+      if (line.length === 0 && token.whitespace) continue;
+
+      const hadLine = line.length > 0;
+      if (
+        preparedTextCandidateWidth(line, token.runs, fontSize) <=
+        maximumWidth
+      ) {
+        line.push(...materializePreparedTextUnits(token.runs));
+        continue;
+      }
+
+      if (hadLine && flushLine()) return lines;
+      if (token.whitespace) continue;
+
+      if (
+        hadLine &&
+        preparedTextRunsWidth(token.runs, fontSize) <= maximumWidth
+      ) {
+        line = materializePreparedTextUnits(token.runs);
+        continue;
+      }
+
+      for (const chunk of splitOversizedPreparedTextToken(
+        token,
+        direction,
+        fontSize,
+        maximumWidth,
+      )) {
+        line = chunk.units;
+        if (chunk.hasMore && flushLine()) return lines;
+      }
+    }
+
+    if (flushLine()) return lines;
   }
   return lines;
 }
 
-function drawTextElement(
+async function drawTextElement(
   page: PDFPage,
   element: TextEditorElement,
-  fonts: EmbeddedFonts,
+  fonts: ExportFontManager,
   transform: PageDrawingTransform,
-): void {
+): Promise<void> {
   const bounds = visualRectForElement(
     element,
     transform.visualWidth,
@@ -1465,17 +2013,16 @@ function drawTextElement(
     });
   }
 
-  const font = fontForElement(element, fonts);
   const fontSize = clamp(element.fontSize, 4, 240);
   const lineHeight = fontSize * 1.22;
-  const lines = wrapText(
-    element.text,
-    font,
+  const maxLines = Math.max(1, Math.floor(bounds.height / lineHeight));
+  const preparedRuns = await fonts.prepareRuns(element, element.text);
+  const lines = wrapPreparedTextRuns(
+    preparedRuns,
     fontSize,
     bounds.width,
-    element.id,
+    maxLines + 1,
   );
-  const maxLines = Math.max(1, Math.floor(bounds.height / lineHeight));
   if (lines.length > maxLines) {
     throw new Error(
       "A text box does not fit all of its content. Resize the box or reduce the font size before exporting.",
@@ -1484,6 +2031,12 @@ function drawTextElement(
   const color = parseColor(element.color) ?? rgb(0.09, 0.13, 0.11);
 
   for (let index = 0; index < Math.min(lines.length, maxLines); index += 1) {
+    const line = lines[index];
+    if (line.width > bounds.width + 0.01) {
+      throw new Error(
+        "A character does not fit inside its text box. Resize the box or reduce the font size before exporting.",
+      );
+    }
     const firstBaselineOffset =
       fontSize * clamp(element.baselineFactor ?? 1, 0.25, 1.75);
     const baseline =
@@ -1492,25 +2045,42 @@ function drawTextElement(
       firstBaselineOffset -
       index * lineHeight;
     if (baseline < bounds.y - fontSize * 0.25) break;
-    const lineAnchor = mapVisualPointToPage(
-      rotateVisualPointAroundElement(
-        { x: bounds.x, y: baseline },
-        bounds,
-        editorRotation,
-      ),
-      transform,
-    );
-    page.drawText(lines[index], {
-      x: lineAnchor.x,
-      y: lineAnchor.y,
-      size: fontSize,
-      font,
-      color,
-      opacity: safeOpacity(element.opacity),
-      rotate: pdfRotation,
-      maxWidth: bounds.width,
-      lineHeight,
-    });
+    let visualX =
+      line.direction === "rtl"
+        ? bounds.x + bounds.width - line.width
+        : bounds.x;
+    for (const run of line.runs) {
+      const lineAnchor = mapVisualPointToPage(
+        rotateVisualPointAroundElement(
+          { x: visualX, y: baseline },
+          bounds,
+          editorRotation,
+        ),
+        transform,
+      );
+      if (run.syntheticBold) {
+        page.pushOperators(
+          pushGraphicsState(),
+          setLineWidth(Math.max(0.2, fontSize * 0.025)),
+          setStrokingRgbColor(color.red, color.green, color.blue),
+          setTextRenderingMode(TextRenderingMode.FillAndOutline),
+        );
+      }
+      page.drawText(run.text, {
+        x: lineAnchor.x,
+        y: lineAnchor.y,
+        size: fontSize,
+        font: run.font,
+        color,
+        opacity: safeOpacity(element.opacity),
+        rotate: pdfRotation,
+        xSkew: run.syntheticItalic ? degrees(12) : undefined,
+      });
+      if (run.syntheticBold) {
+        page.pushOperators(popGraphicsState());
+      }
+      visualX += run.font.widthOfTextAtSize(run.text, fontSize);
+    }
   }
 }
 
@@ -1765,6 +2335,9 @@ function dataUrlParts(dataUrl: string): ImageDataParts {
       pixelCount: imageInfo.width * imageInfo.height,
     };
   } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw error;
+    }
     if (
       error instanceof Error &&
       (error.name === "PdfSecurityLimitError" ||
@@ -1862,13 +2435,13 @@ async function drawElement(
   document: PDFDocument,
   page: PDFPage,
   element: EditorElement,
-  fonts: EmbeddedFonts,
+  fonts: ExportFontManager,
   transform: PageDrawingTransform,
   imageCache: Map<string, Promise<PDFImage>>,
   validatedImages: ReadonlyMap<string, ImageDataParts>,
 ): Promise<void> {
   if (element.type === "text") {
-    drawTextElement(page, element, fonts, transform);
+    await drawTextElement(page, element, fonts, transform);
     return;
   }
   if (
@@ -1895,7 +2468,39 @@ async function drawElement(
   }
 }
 
-function sourcePageHasAnnotations(page: PDFPage): boolean {
+const NONVISUAL_OR_ACTIVE_PAGE_KEYS = Object.freeze([
+  "AA",
+  "AcroForm",
+  "AF",
+  "B",
+  "Collection",
+  "Dur",
+  "EmbeddedFiles",
+  "JavaScript",
+  "Metadata",
+  "Names",
+  "OpenAction",
+  "PieceInfo",
+  "PresSteps",
+  "Thumb",
+  "Trans",
+] as const);
+
+/**
+ * `copyPages` retains the complete page dictionary. Interactive annotations,
+ * additional actions, associated files, and presentation actions therefore
+ * have to take the inspected raster path instead of being copied into an
+ * edited document.
+ */
+function sourcePageRequiresFlattening(page: PDFPage): boolean {
+  if (
+    NONVISUAL_OR_ACTIVE_PAGE_KEYS.some(
+      (key) => page.node.get(PDFName.of(key)) !== undefined,
+    )
+  ) {
+    return true;
+  }
+
   const annotationEntry = page.node.get(PDFName.of("Annots"));
   if (!annotationEntry) return false;
 
@@ -1923,8 +2528,8 @@ export function sourceTextCleanupGeometry(element: TextEditorElement): {
   const source = element.sourceText;
   return {
     backgroundColor:
-      source?.originalBackgroundColor ||
       element.backgroundColor ||
+      source?.originalBackgroundColor ||
       "#ffffff",
     height: source?.originalHeight ?? element.height,
     rotation: source?.originalRotation ?? element.rotation ?? 0,
@@ -1934,94 +2539,144 @@ export function sourceTextCleanupGeometry(element: TextEditorElement): {
   };
 }
 
-function drawSourceTextCleanup(
-  page: PDFPage,
-  element: TextEditorElement,
-  transform: PageDrawingTransform,
-): void {
-  const cleanup = sourceTextCleanupGeometry(element);
-  const visualBounds: VisualRect = {
-    x: clamp(cleanup.x, -4, 5) * transform.visualWidth,
-    y:
-      transform.visualHeight -
-      clamp(cleanup.y, -4, 5) * transform.visualHeight -
-      Math.max(
-        0,
-        clamp(cleanup.height, 0, 5) * transform.visualHeight,
-      ),
-    width: Math.max(
-      0,
-      clamp(cleanup.width, 0, 5) * transform.visualWidth,
-    ),
-    height: Math.max(
-      0,
-      clamp(cleanup.height, 0, 5) * transform.visualHeight,
-    ),
-  };
-  if (visualBounds.width <= 0 || visualBounds.height <= 0) return;
-
-  const anchor = elementAnchor(
-    visualBounds,
-    transform,
-    cleanup.rotation,
-  );
-  page.drawRectangle({
-    x: anchor.x,
-    y: anchor.y,
-    width: visualBounds.width,
-    height: visualBounds.height,
-    color: parseColor(cleanup.backgroundColor) ?? rgb(1, 1, 1),
-    opacity: 1,
-    rotate: degrees(
-      elementPdfRotation(transform, cleanup.rotation),
-    ),
-  });
-}
-
 async function rasterizeSourcePage(
   preview: PdfPreviewDocument,
   sourcePageIndex: number,
   rotation: 0 | 90 | 180 | 270,
+  canvasPixelBudget: number,
   sourceTextEdits: TextEditorElement[] = [],
+  signal?: AbortSignal,
 ): Promise<RasterizedSourcePage> {
   if (typeof window === "undefined" || !globalThis.document) {
     throw new Error(
-      "A source page contains annotations or form widgets and must be exported in a browser so their visible appearance can be flattened.",
+      "A source page must be exported in a browser so edited pixels, annotations, or form widgets can be flattened safely.",
     );
   }
 
   const pdfPage = await preview.getPage(sourcePageIndex + 1);
   let renderTask: ReturnType<typeof pdfPage.render> | null = null;
   let canvas: HTMLCanvasElement | null = null;
+  const cancelRender = () => renderTask?.cancel();
 
   try {
+    throwIfAborted(signal, "PDF export was cancelled.");
     const logicalViewport = pdfPage.getViewport({
       rotation,
       scale: 1,
     });
-    const maxDimension = 4096;
-    const maxPixels = 16_000_000;
-    const preferredScale = 3;
+    if (
+      !Number.isFinite(logicalViewport.width) ||
+      !Number.isFinite(logicalViewport.height) ||
+      logicalViewport.width <= 0 ||
+      logicalViewport.height <= 0
+    ) {
+      throw new Error(
+        "The source page has invalid dimensions and cannot be flattened.",
+      );
+    }
+    const logicalCanvasArea =
+      logicalViewport.width * logicalViewport.height;
+    if (
+      !Number.isFinite(logicalCanvasArea) ||
+      logicalCanvasArea <= 0
+    ) {
+      throw securityLimitError({
+        code: "editor-raster-pixels-too-large",
+        maximum:
+          PDF_SECURITY_LIMITS.maxEditorRasterCanvasPixelsTotal,
+      });
+    }
+    if (
+      !Number.isSafeInteger(canvasPixelBudget) ||
+      canvasPixelBudget < 1
+    ) {
+      throw securityLimitError({
+        code: "editor-raster-pixels-too-large",
+        maximum:
+          PDF_SECURITY_LIMITS.maxEditorRasterCanvasPixelsTotal,
+      });
+    }
+    const pagePixelBudget = Math.min(
+      PDF_SECURITY_LIMITS.maxEditorRasterCanvasPixels,
+      canvasPixelBudget,
+    );
     const limitedScale = Math.min(
-      preferredScale,
-      maxDimension / Math.max(1, logicalViewport.width),
-      maxDimension / Math.max(1, logicalViewport.height),
+      PDF_SECURITY_LIMITS.editorRasterTargetScale,
+      PDF_SECURITY_LIMITS.maxEditorRasterCanvasDimension /
+        Math.max(1, logicalViewport.width),
+      PDF_SECURITY_LIMITS.maxEditorRasterCanvasDimension /
+        Math.max(1, logicalViewport.height),
       Math.sqrt(
-        maxPixels /
-          Math.max(
-            1,
-            logicalViewport.width * logicalViewport.height,
-          ),
+        pagePixelBudget /
+          Math.max(1, logicalCanvasArea),
       ),
     );
-    const renderViewport = pdfPage.getViewport({
+    if (!Number.isFinite(limitedScale) || limitedScale <= 0) {
+      throw securityLimitError({
+        code: "editor-raster-pixels-too-large",
+        maximum:
+          PDF_SECURITY_LIMITS.maxEditorRasterCanvasPixelsTotal,
+      });
+    }
+    let renderScale = limitedScale;
+    let renderViewport = pdfPage.getViewport({
       rotation,
-      scale: Math.max(0.1, limitedScale),
+      scale: renderScale,
     });
+    let canvasWidth = Math.max(1, Math.ceil(renderViewport.width));
+    let canvasHeight = Math.max(1, Math.ceil(renderViewport.height));
+
+    /*
+     * Viewport dimensions are rounded up for the canvas. Refit after rounding
+     * so the exact allocation, not only its floating-point estimate, remains
+     * inside both the per-page and aggregate pixel budgets.
+     */
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const canvasPixels = canvasWidth * canvasHeight;
+      if (
+        canvasWidth <=
+          PDF_SECURITY_LIMITS.maxEditorRasterCanvasDimension &&
+        canvasHeight <=
+          PDF_SECURITY_LIMITS.maxEditorRasterCanvasDimension &&
+        Number.isSafeInteger(canvasPixels) &&
+        canvasPixels <= pagePixelBudget
+      ) {
+        break;
+      }
+      const reduction = Math.min(
+        PDF_SECURITY_LIMITS.maxEditorRasterCanvasDimension /
+          canvasWidth,
+        PDF_SECURITY_LIMITS.maxEditorRasterCanvasDimension /
+          canvasHeight,
+        Math.sqrt(pagePixelBudget / Math.max(1, canvasPixels)),
+      );
+      renderScale *= Math.max(Number.EPSILON, reduction * 0.999);
+      renderViewport = pdfPage.getViewport({
+        rotation,
+        scale: renderScale,
+      });
+      canvasWidth = Math.max(1, Math.ceil(renderViewport.width));
+      canvasHeight = Math.max(1, Math.ceil(renderViewport.height));
+    }
+    const canvasPixelCount = canvasWidth * canvasHeight;
+    if (
+      canvasWidth >
+        PDF_SECURITY_LIMITS.maxEditorRasterCanvasDimension ||
+      canvasHeight >
+        PDF_SECURITY_LIMITS.maxEditorRasterCanvasDimension ||
+      !Number.isSafeInteger(canvasPixelCount) ||
+      canvasPixelCount > pagePixelBudget
+    ) {
+      throw securityLimitError({
+        code: "editor-raster-pixels-too-large",
+        maximum:
+          PDF_SECURITY_LIMITS.maxEditorRasterCanvasPixelsTotal,
+      });
+    }
 
     canvas = globalThis.document.createElement("canvas");
-    canvas.width = Math.max(1, Math.ceil(renderViewport.width));
-    canvas.height = Math.max(1, Math.ceil(renderViewport.height));
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
 
     renderTask = pdfPage.render({
       annotationMode: 1, // PDF.js AnnotationMode.ENABLE, including widget appearances.
@@ -2029,7 +2684,9 @@ async function rasterizeSourcePage(
       canvas,
       viewport: renderViewport,
     });
+    signal?.addEventListener("abort", cancelRender, { once: true });
     await renderTask.promise;
+    throwIfAborted(signal, "PDF export was cancelled.");
 
     if (sourceTextEdits.length) {
       const context = canvas.getContext("2d");
@@ -2065,8 +2722,11 @@ async function rasterizeSourcePage(
       }
     }
 
+    const bytes = await canvasToPngBytes(canvas);
+    throwIfAborted(signal, "PDF export was cancelled.");
     return {
-      bytes: await canvasToPngBytes(canvas),
+      bytes,
+      canvasPixelCount,
       width: logicalViewport.width,
       height: logicalViewport.height,
     };
@@ -2082,6 +2742,7 @@ async function rasterizeSourcePage(
     }
     throw error;
   } finally {
+    signal?.removeEventListener("abort", cancelRender);
     renderTask?.cancel();
     pdfPage.cleanup();
     if (canvas) {
@@ -2143,16 +2804,19 @@ function validatePages(
  * Exports the visual editor state without sending bytes outside the current
  * runtime. Source pages stay as their original vector PDF whenever an edited
  * text-show operation can be identified uniquely and neutralized. Ambiguous
- * content streams and pages with live annotations use the explicit PDF.js
- * raster fallback so original glyphs are never hidden below a replacement.
+ * content streams, OCR-backed edits, and pages with live annotations use the
+ * explicit PDF.js raster fallback so original glyphs or scanned pixels are
+ * never recoverable below a replacement.
  */
 export async function exportEditedPdf(
   input: ExportEditedPdfInput,
 ): Promise<ExportEditedPdfResult> {
   report(input.onProgress, 0, "Preparing document");
   let annotationPreview: PdfPreviewDocument | null = null;
+  let fontManager: ExportFontManager | null = null;
 
   try {
+    throwIfAborted(input.signal, "PDF export was cancelled.");
     const provisionalElements = input.elements.map((element) =>
       element.type === "image"
         ? { ...element, pixelCount: 1 }
@@ -2196,6 +2860,7 @@ export async function exportEditedPdf(
     }
 
     const source = await loadSource(input.sourceBytes);
+    throwIfAborted(input.signal, "PDF export was cancelled.");
     if (source) assertPdfPageTreeWithinLimits(source);
     const sourcePageIssue = source
       ? getPageCountLimitIssue(source.getPageCount())
@@ -2220,33 +2885,18 @@ export async function exportEditedPdf(
     }
 
     const output = await PDFDocument.create();
-    const fonts: EmbeddedFonts = {
-      Helvetica: {
-        regular: await output.embedFont(StandardFonts.Helvetica),
-        bold: await output.embedFont(StandardFonts.HelveticaBold),
-        italic: await output.embedFont(StandardFonts.HelveticaOblique),
-        boldItalic: await output.embedFont(
-          StandardFonts.HelveticaBoldOblique,
-        ),
-      },
-      Times: {
-        regular: await output.embedFont(StandardFonts.TimesRoman),
-        bold: await output.embedFont(StandardFonts.TimesRomanBold),
-        italic: await output.embedFont(StandardFonts.TimesRomanItalic),
-        boldItalic: await output.embedFont(
-          StandardFonts.TimesRomanBoldItalic,
-        ),
-      },
-      Courier: {
-        regular: await output.embedFont(StandardFonts.Courier),
-        bold: await output.embedFont(StandardFonts.CourierBold),
-        italic: await output.embedFont(StandardFonts.CourierOblique),
-        boldItalic: await output.embedFont(
-          StandardFonts.CourierBoldOblique,
-        ),
-      },
-    };
+    const fonts = createExportFontManager(
+      output,
+      input.fontAssetLoader,
+      input.signal,
+    );
+    fontManager = fonts;
     const imageCache = new Map<string, Promise<PDFImage>>();
+    let rasterBudget: EditorRasterBudget = {
+      pageCount: 0,
+      canvasPixelCount: 0,
+      encodedByteCount: 0,
+    };
     const elementsByPage = new Map<string, EditorElement[]>();
     for (const element of input.elements) {
       const pageElements = elementsByPage.get(element.pageId) ?? [];
@@ -2255,6 +2905,7 @@ export async function exportEditedPdf(
     }
 
     for (let index = 0; index < input.pages.length; index += 1) {
+      throwIfAborted(input.signal, "PDF export was cancelled.");
       const model = input.pages[index];
       const sourceWidth = safeDimension(model.sourceWidth, A4_WIDTH);
       const sourceHeight = safeDimension(model.sourceHeight, A4_HEIGHT);
@@ -2263,9 +2914,14 @@ export async function exportEditedPdf(
         (element): element is TextEditorElement =>
           element.type === "text" && Boolean(element.sourceText),
       );
+      const nativeSourceTextEdits = sourceTextEdits.filter(
+        (element) => element.sourceText?.kind === "native",
+      );
+      const ocrSourceTextEdits = sourceTextEdits.filter(
+        (element) => element.sourceText?.kind === "ocr",
+      );
       let page: PDFPage;
       let transform: PageDrawingTransform;
-      let vectorSourceTextCleanup = false;
       if (model.sourcePageIndex !== null && source) {
         const sourcePage = source.getPage(model.sourcePageIndex);
         const rotation = quarterTurn(model.sourceRotation + model.rotation);
@@ -2276,31 +2932,62 @@ export async function exportEditedPdf(
             );
           }
         }
-        const hasSourceAnnotations =
-          sourcePageHasAnnotations(sourcePage);
+        const mustFlattenSourcePage =
+          sourcePageRequiresFlattening(sourcePage);
         const rewrittenContents =
-          !hasSourceAnnotations && sourceTextEdits.length > 0
+          !mustFlattenSourcePage &&
+          ocrSourceTextEdits.length === 0 &&
+          nativeSourceTextEdits.length > 0
             ? rewrittenSourcePageContents(
                 sourcePage,
-                sourceTextEdits,
+                nativeSourceTextEdits,
               )
             : null;
         if (
-          hasSourceAnnotations ||
-          (sourceTextEdits.length > 0 && !rewrittenContents)
+          mustFlattenSourcePage ||
+          ocrSourceTextEdits.length > 0 ||
+          (nativeSourceTextEdits.length > 0 && !rewrittenContents)
         ) {
           if (!input.sourceBytes?.byteLength) {
             throw new Error(
               `Page ${model.sourcePageIndex + 1} must be flattened but its source bytes are unavailable.`,
             );
           }
+          const prospectivePageIssue =
+            getEditorRasterBudgetLimitIssue({
+              ...rasterBudget,
+              pageCount: rasterBudget.pageCount + 1,
+              canvasPixelCount:
+                rasterBudget.canvasPixelCount + 1,
+            });
+          if (prospectivePageIssue) {
+            throw securityLimitError(prospectivePageIssue);
+          }
           annotationPreview ??= await loadPdfPreview(input.sourceBytes);
           const raster = await rasterizeSourcePage(
             annotationPreview,
             model.sourcePageIndex,
             rotation,
+            PDF_SECURITY_LIMITS
+              .maxEditorRasterCanvasPixelsTotal -
+              rasterBudget.canvasPixelCount,
             sourceTextEdits,
+            input.signal,
           );
+          const nextRasterBudget: EditorRasterBudget = {
+            pageCount: rasterBudget.pageCount + 1,
+            canvasPixelCount:
+              rasterBudget.canvasPixelCount +
+              raster.canvasPixelCount,
+            encodedByteCount:
+              rasterBudget.encodedByteCount + raster.bytes.byteLength,
+          };
+          const rasterBudgetIssue =
+            getEditorRasterBudgetLimitIssue(nextRasterBudget);
+          if (rasterBudgetIssue) {
+            throw securityLimitError(rasterBudgetIssue);
+          }
+          rasterBudget = nextRasterBudget;
           page = output.addPage([raster.width, raster.height]);
           const background = await output.embedPng(raster.bytes);
           page.drawImage(background, {
@@ -2322,17 +3009,16 @@ export async function exportEditedPdf(
           /*
            * copyPages preserves the complete source page dictionary, including
            * empty pages that do not have a /Contents entry. Pages containing
-           * /Annots are intentionally handled above: pdf-lib cannot reliably
-           * transplant their document-level AcroForm/parent structures, so
-           * PDF.js paints the exact appearance seen by the editor and we
-           * flatten it into the page background.
+           * annotations, additional actions, associated files, and
+           * presentation actions are intentionally handled above. PDF.js
+           * paints the static appearance seen by the editor and the export
+           * cannot retain their active page-dictionary entries.
            */
           const [copiedPage] = await output.copyPages(source, [
             model.sourcePageIndex,
           ]);
           if (rewrittenContents) {
             replacePageContents(output, copiedPage, rewrittenContents);
-            vectorSourceTextCleanup = true;
           }
           copiedPage.setRotation(degrees(rotation));
           output.addPage(copiedPage);
@@ -2372,12 +3058,8 @@ export async function exportEditedPdf(
         };
       }
 
-      if (vectorSourceTextCleanup) {
-        for (const edit of sourceTextEdits) {
-          drawSourceTextCleanup(page, edit, transform);
-        }
-      }
       for (const element of pageElements) {
+        throwIfAborted(input.signal, "PDF export was cancelled.");
         await drawElement(
           output,
           page,
@@ -2400,11 +3082,13 @@ export async function exportEditedPdf(
     }
 
     report(input.onProgress, 93, "Saving PDF");
+    throwIfAborted(input.signal, "PDF export was cancelled.");
     const bytes = await output.save({
       addDefaultPage: false,
       useObjectStreams: true,
       updateFieldAppearances: false,
     });
+    throwIfAborted(input.signal, "PDF export was cancelled.");
     const filename = sanitizeFilename(input.filename);
     report(input.onProgress, 100, "Ready");
 
@@ -2415,10 +3099,16 @@ export async function exportEditedPdf(
       filename,
     };
   } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw error;
+    }
     if (
       error instanceof Error &&
       error.name === "PdfSecurityLimitError"
     ) {
+      throw error;
+    }
+    if (error instanceof PdfEditorFontError) {
       throw error;
     }
     if (error instanceof Error) {
@@ -2430,6 +3120,7 @@ export async function exportEditedPdf(
       cause: error,
     });
   } finally {
+    fontManager?.dispose();
     if (annotationPreview) {
       try {
         await disposePdfPreview(annotationPreview);

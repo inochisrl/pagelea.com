@@ -29,7 +29,6 @@ interface PdfPageCanvasProps {
   page: EditorPage;
   className?: string;
   quality?: PreviewQuality;
-  onReady?: (size: { width: number; height: number }) => void;
 }
 
 interface PreviewSize {
@@ -164,11 +163,9 @@ function PdfPageCanvas({
   page,
   className,
   quality = "main",
-  onReady,
 }: PdfPageCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const onReadyRef = useRef(onReady);
   const {
     rotation: pageRotation,
     sourceHeight,
@@ -194,10 +191,6 @@ function PdfPageCanvas({
     ),
   );
   const [errorMessage, setErrorMessage] = useState("");
-
-  useEffect(() => {
-    onReadyRef.current = onReady;
-  }, [onReady]);
 
   useEffect(() => {
     if (quality !== "thumbnail" || sourcePageIndex === null) {
@@ -255,10 +248,6 @@ function PdfPageCanvas({
       setPreviewSize(fallbackSize);
       setErrorMessage("");
       setPreviewState(pendingState);
-
-      if (pendingState === "blank") {
-        onReadyRef.current?.(fallbackSize);
-      }
     });
 
     if (sourcePageIndex === null) {
@@ -295,8 +284,6 @@ function PdfPageCanvas({
         };
 
         setPreviewSize(logicalSize);
-        onReadyRef.current?.(logicalSize);
-
         const activeCanvas = canvasRef.current;
         if (!activeCanvas || activeCanvas !== canvas) return;
 

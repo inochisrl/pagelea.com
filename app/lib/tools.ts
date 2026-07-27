@@ -48,9 +48,9 @@ export const TOOLS = [
     brand: PAGELEA_BRAND,
     slug: "pdf-editor",
     title: "PDF Editor",
-    subtitle: "Click existing PDF text, rewrite it, and keep working.",
+    subtitle: "Rewrite native or scanned PDF text without uploading it.",
     description:
-      "Detect and replace existing text, then add images, shapes, highlights, signatures, freehand marks, and whiteout in your browser.",
+      "Edit existing text, recognize English or Italian scans locally, then add images, shapes, highlights, signatures, freehand marks, and whiteout.",
     guideTitle: "How to edit a PDF",
     category: "Edit & Sign",
     icon: "edit",
@@ -59,7 +59,8 @@ export const TOOLS = [
     multiple: false,
     howTo: [
       "Open a PDF in the Pagelea editor.",
-      "Choose Edit text and select an outlined text block.",
+      "Choose Edit text. If the page is a scan, run Private Rewrite locally.",
+      "Select an outlined native or recognized text block.",
       "Rewrite it inline, then adjust its font, size, color, or position.",
       "Export and review the revised PDF.",
     ],

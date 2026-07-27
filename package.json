@@ -1,6 +1,6 @@
 {
   "name": "pagelea-pdf-workbench",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Privacy-first PDF workbench for editing, organizing, and securing documents in the browser.",
   "private": true,
   "license": "AGPL-3.0-or-later",
@@ -29,20 +29,25 @@
     "build": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "test": "npm run build && node --test tests/*.test.mjs",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern public/pdf.worker.min.mjs --ignore-pattern 'public/pdfjs/**'",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern public/pdf.worker.min.mjs --ignore-pattern 'public/pdfjs/**' --ignore-pattern 'public/private-rewrite/**'",
     "typecheck": "tsc --noEmit",
     "licenses:list": "npm query '*' --json",
     "licenses:check": "node scripts/check-licenses.mjs",
+    "assets:check": "node scripts/verify-private-rewrite-assets.mjs",
+    "postinstall": "patch-package --error-on-fail",
     "sbom": "node scripts/generate-sbom.mjs"
   },
   "dependencies": {
+    "@pdf-lib/fontkit": "1.1.1",
     "lucide-react": "^1.26.0",
     "next": "16.2.11",
     "pako": "3.0.1",
+    "patch-package": "8.0.1",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "6.1.200",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "tesseract.js": "7.0.0"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.47.0",
@@ -75,6 +80,7 @@
   "allowScripts": {
     "esbuild@0.28.1": true,
     "fsevents@2.3.3": true,
+    "tesseract.js@7.0.0": false,
     "workerd@1.20260722.1": true
   }
 }

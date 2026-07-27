@@ -30,10 +30,12 @@ export function generateMetadata(): Metadata {
       template: "%s · Pagelea",
     },
     description:
-      "Rewrite existing PDF text, merge, organize, optimize, split and sign documents with eight free, open-source tools that process files locally in your browser.",
+      "Rewrite native or scanned PDF text with local OCR, then merge, organize, optimize, split and sign documents with eight free, open-source browser tools.",
     applicationName: "Pagelea",
     keywords: [
       "PDF editor",
+      "OCR PDF",
+      "edit scanned PDF",
       "merge PDF",
       "optimize PDF",
       "split PDF",

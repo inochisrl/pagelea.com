@@ -17,6 +17,7 @@ const ALLOWED_LICENSES = new Set([
   "MIT AND Zlib",
   "MIT OR Apache-2.0",
   "MPL-2.0",
+  "Public Domain",
 ]);
 
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";

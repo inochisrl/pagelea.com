@@ -11,6 +11,8 @@ const eslintConfig = tseslint.config(
     ".wrangler/**",
     "dist/**",
     "out/**",
+    "output/**",
+    "tmp/**",
     "build/**",
     "next-env.d.ts",
     "public/pdf.worker.min.mjs",

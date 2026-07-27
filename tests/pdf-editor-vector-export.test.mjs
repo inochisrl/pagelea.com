@@ -10,8 +10,11 @@ import {
   PDFDict,
   PDFDocument,
   PDFName,
+  PDFRawStream,
   PDFStream,
   StandardFonts,
+  decodePDFRawStream,
+  rgb,
 } from "pdf-lib";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 
@@ -62,6 +65,7 @@ function replacementElement(originalText, text = "Replacement text") {
     italic: false,
     backgroundColor: "#ffffff",
     sourceText: {
+      kind: "native",
       id: "source-text-1",
       pageIndex: 0,
       originalText,
@@ -138,6 +142,29 @@ async function extractedTextItems(bytes, pageNumber = 1) {
   }
 }
 
+function decodedPageContent(document, page) {
+  const rawContents = page.node.get(PDFName.of("Contents"), true);
+  const entries =
+    rawContents instanceof PDFArray
+      ? rawContents.asArray()
+      : rawContents
+        ? [rawContents]
+        : [];
+  const decoder = new TextDecoder();
+  return entries
+    .map((entry) => {
+      const stream = document.context.lookup(entry);
+      if (stream instanceof PDFContentStream) {
+        return decoder.decode(stream.getUnencodedContents());
+      }
+      if (stream instanceof PDFRawStream) {
+        return decoder.decode(decodePDFRawStream(stream).decode());
+      }
+      return "";
+    })
+    .join("\n");
+}
+
 test("existing-text export preserves unedited vectors and removes the old searchable glyphs", async () => {
   const original = await sourcePdf([
     { text: "Keep searchable", x: 30, y: 150 },
@@ -188,6 +215,104 @@ test("existing-text export preserves unedited vectors and removes the old search
     xObjects?.entries().length ?? 0,
     0,
     "the compatible page must not be replaced by a raster image",
+  );
+});
+
+test("native vector replacement does not paint over non-uniform backgrounds", async () => {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  const page = document.addPage([300, 200]);
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  page.drawRectangle({
+    x: 20,
+    y: 85,
+    width: 90,
+    height: 35,
+    color: rgb(0.92, 0.24, 0.2),
+  });
+  page.drawRectangle({
+    x: 110,
+    y: 85,
+    width: 90,
+    height: 35,
+    color: rgb(0.18, 0.58, 0.4),
+  });
+  page.drawRectangle({
+    x: 200,
+    y: 85,
+    width: 80,
+    height: 35,
+    color: rgb(0.18, 0.38, 0.78),
+  });
+  page.drawText("Original secret", {
+    x: 30,
+    y: 100,
+    size: 14,
+    font,
+  });
+  const sourceBytes = await document.save({ useObjectStreams: true });
+  const persistedSource = await PDFDocument.load(sourceBytes, {
+    updateMetadata: false,
+  });
+  const sourceBackgroundPathCount = (
+    decodedPageContent(
+      persistedSource,
+      persistedSource.getPage(0),
+    ).match(/(?:^|\n)0 0 m(?:\n|$)/g) ?? []
+  ).length;
+  assert.equal(sourceBackgroundPathCount, 3);
+
+  const result = await editorExport.exportEditedPdf({
+    sourceBytes,
+    pages: [pageModel],
+    elements: [replacementElement("Original secret")],
+    filename: "non-uniform-background.pdf",
+  });
+  const outputBytes = new Uint8Array(await result.blob.arrayBuffer());
+  const output = await PDFDocument.load(outputBytes, {
+    updateMetadata: false,
+  });
+  const outputBackgroundPathCount = (
+    decodedPageContent(output, output.getPage(0)).match(
+      /(?:^|\n)0 0 m(?:\n|$)/g,
+    ) ?? []
+  ).length;
+
+  assert.equal(
+    outputBackgroundPathCount,
+    sourceBackgroundPathCount,
+    "native replacement must not add an opaque cleanup rectangle",
+  );
+  assert.deepEqual(
+    (await extractedTextItems(outputBytes)).map((item) => item.str),
+    ["Replacement text"],
+  );
+});
+
+test("OCR replacement requires secure browser flattening of original pixels", async () => {
+  const original = await sourcePdf([
+    { text: "Keep searchable", x: 30, y: 150 },
+  ]);
+  const replacement = replacementElement(
+    "Scanned words",
+    "Unicode replacement",
+  );
+  replacement.sourceText = {
+    ...replacement.sourceText,
+    kind: "ocr",
+    language: "eng",
+    confidence: 94,
+  };
+
+  await assert.rejects(
+    editorExport.exportEditedPdf({
+      sourceBytes: original,
+      pages: [pageModel],
+      elements: [replacement],
+      filename: "ocr-edited.pdf",
+    }),
+    /PDF previews can only be loaded in the browser/i,
   );
 });
 

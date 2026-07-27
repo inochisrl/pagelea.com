@@ -34,9 +34,20 @@ interface EditorElementBase {
   rotation?: number;
 }
 
-export type EditorFontFamily = "Helvetica" | "Times" | "Courier";
+export type EditorFontFamily =
+  | "Helvetica"
+  | "Times"
+  | "Courier"
+  | "Noto Sans"
+  | "Noto Sans Condensed"
+  | "Noto Serif"
+  | "Noto Sans Mono";
 
-interface SourceTextReference {
+export type EditorTextDirection = "ltr" | "rtl";
+export type SourceTextKind = "native" | "ocr";
+export type FontMatchConfidence = "exact" | "close" | "generic";
+
+interface SourceTextReferenceBase {
   /** Stable PDF.js text-run identifier used to hide the source hit target. */
   id: string;
   /** Zero-based page index in the original PDF. */
@@ -47,6 +58,10 @@ interface SourceTextReference {
   fontName: string;
   /** Best-effort CSS family reported by PDF.js. */
   detectedFontFamily?: string;
+  /** Human-readable font name resolved from PDF.js internals. */
+  detectedFontName?: string;
+  /** How closely Pagelea can map the source font to a bundled export font. */
+  fontMatchConfidence?: FontMatchConfidence;
   /**
    * Immutable visual geometry of the original run. The replacement element
    * can move or resize, but export must always erase the source glyphs here.
@@ -60,6 +75,31 @@ interface SourceTextReference {
   originalBackgroundColor: string;
 }
 
+export interface NativeSourceTextReference
+  extends SourceTextReferenceBase {
+  /**
+   * Native runs map to a source PDF text-show operation. Export neutralizes
+   * that operation before drawing the replacement.
+   */
+  kind: "native";
+}
+
+export interface OcrSourceTextReference
+  extends SourceTextReferenceBase {
+  /**
+   * OCR runs map only to visible pixels. Export securely rasterizes the
+   * affected source page after repairing the immutable source rectangle, so
+   * the old pixels cannot remain recoverable beneath the replacement.
+   */
+  kind: "ocr";
+  language: string;
+  confidence: number;
+}
+
+export type SourceTextReference =
+  | NativeSourceTextReference
+  | OcrSourceTextReference;
+
 export interface TextEditorElement extends EditorElementBase {
   type: "text";
   text: string;
@@ -67,15 +107,16 @@ export interface TextEditorElement extends EditorElementBase {
   /** Baseline distance from the top edge, expressed as a font-size multiple. */
   baselineFactor?: number;
   fontFamily?: EditorFontFamily;
+  /** Reading direction used for canvas alignment and Unicode export. */
+  direction?: EditorTextDirection;
   color: string;
   bold: boolean;
   italic: boolean;
   backgroundColor?: string;
   /**
    * Present when this element visually replaces an existing PDF text run.
-   * Compatible source operators are neutralized in place; uncertain content
-   * uses the raster fallback so old searchable glyphs are never hidden below
-   * the replacement.
+   * Native source operators are neutralized in place when safe; OCR sources
+   * force secure rasterization of the affected source page after repair.
    */
   sourceText?: SourceTextReference;
 }

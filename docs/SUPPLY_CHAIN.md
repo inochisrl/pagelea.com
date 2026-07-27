@@ -37,17 +37,23 @@ npm run sbom -- > pagelea-sbom.cdx.json
 ```
 
 The generated SBOM is intentionally ignored in normal development because it
-is derived from `package-lock.json`. CI regenerates and validates it on every
-change. Each tagged release should publish its exact SBOM alongside the source
-archive and release artifacts.
+is derived from `package-lock.json` plus the verified Private Rewrite asset
+manifest. CI regenerates and validates it on every change. Each tagged release
+should publish its exact SBOM alongside the source archive and release
+artifacts.
 
 `scripts/generate-sbom.mjs` removes npm's random serial number and wall-clock
-timestamp, sorts dependency records, and derives the root component identity
-from `package.json`. This prevents a checkout-directory name from leaking into
+timestamp, sorts dependency records, derives the root component identity from
+`package.json`, and adds a hashed CycloneDX file component for every manifest
+asset and retained licence. It also records the exact third-party libraries
+incorporated into the generated OCR worker and links them to that file in the
+dependency graph. This prevents a checkout-directory name from leaking into
 release evidence and makes the output byte-for-byte reproducible for the same
-lockfile, package metadata, Node.js, and npm versions. CI verifies the root
-name, version, bom-ref, package URL, application type, and
-`AGPL-3.0-or-later` licence before uploading the artifact.
+installed dependency tree, lockfile, package metadata, asset manifest, Node.js
+and npm versions, operating system, and architecture. CI verifies the root
+identity and licence, regenerates the SBOM twice on the same Ubuntu runner, and
+rejects any missing, extra, or changed Private Rewrite component before
+uploading the official release artifact.
 
 The release record should include:
 
@@ -72,6 +78,29 @@ PDF.js assets are self-hosted under `public/pdfjs`. Their licence files must
 remain beside the binary, font, CMap, and WebAssembly files. A build or
 packaging change must verify those notices are still included.
 
+Private Rewrite assets are self-hosted under `public/private-rewrite` and
+declared in `config/private-rewrite-assets.v1.json`. Any OCR model, worker,
+WebAssembly loader, or font change must update the retained licence, exact
+size, SHA-256 digest, upstream revision, path, and transformation record. Run:
+
+```bash
+npm run assets:check
+```
+
+The check also pins the third-party packages incorporated into the Tesseract
+worker bundle. It rejects missing, unexpected, changed, oversized, symlinked,
+or path-traversing assets, bundle components, and retained licence entries.
+
+The locked install also applies
+`patches/tesseract.js+7.0.0.patch` with `patch-package`. This reviewed patch
+adds cancellation and deterministic cleanup around the browser OCR worker.
+`npm ci` must fail if the patch no longer applies exactly, and
+`tests/tesseract-bootstrap-patch.test.mjs` exercises its bootstrap failure,
+abort, runtime-crash, image-loading, success, and disposal paths. Tesseract's
+own package lifecycle script remains disallowed in `package.json`; for
+Tesseract, the repository's reviewed patch step is the only install-time
+action.
+
 ## Release gate
 
 A release is not complete until:
@@ -85,4 +114,7 @@ A release is not complete until:
 - the generated SBOM parses and identifies Pagelea as
   an `AGPL-3.0-or-later` application using the package name and version;
 - bundled third-party notices are present;
+- the Private Rewrite asset manifest passes `npm run assets:check`;
+- the Tesseract source patch applies during a clean `npm ci` and its focused
+  regression tests pass;
 - the exact release commit passes the complete quality gate.

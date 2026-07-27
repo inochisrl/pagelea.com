@@ -71,6 +71,20 @@ async function createDeepPageGraphFixture(depth = 6_000) {
   return document.save({ useObjectStreams: true });
 }
 
+async function createPageDictionaryPayloadFixture(pageKey) {
+  const document = await PDFDocument.create({
+    updateMetadata: false,
+  });
+  const page = document.addPage([100, 120]);
+  page.node.set(
+    PDFName.of(pageKey),
+    document.context.obj({
+      Payload: "private-rewrite-security-fixture",
+    }),
+  );
+  return document.save({ useObjectStreams: true });
+}
+
 function dataUrl(mimeType, bytes) {
   return `data:${mimeType};base64,${Buffer.from(bytes).toString("base64")}`;
 }
@@ -109,6 +123,20 @@ function textElement(text, width = 0.05, height = 0.02) {
   };
 }
 
+function preparedRun(text, font, direction = "ltr") {
+  return {
+    direction,
+    font,
+    syntheticBold: false,
+    syntheticItalic: false,
+    text,
+  };
+}
+
+function lineText(line) {
+  return line.runs.map((run) => run.text).join("");
+}
+
 test("editor export still copies a normal vector source page", async () => {
   const document = await PDFDocument.create({
     updateMetadata: false,
@@ -134,6 +162,44 @@ test("editor export still copies a normal vector source page", async () => {
 
   assert.equal(output.getPageCount(), 1);
 });
+
+for (const pageKey of [
+  "AA",
+  "AcroForm",
+  "AF",
+  "B",
+  "Collection",
+  "Dur",
+  "EmbeddedFiles",
+  "JavaScript",
+  "Metadata",
+  "Names",
+  "OpenAction",
+  "PieceInfo",
+  "PresSteps",
+  "Thumb",
+  "Trans",
+]) {
+  test(`editor export flattens source pages carrying /${pageKey}`, async () => {
+    await assert.rejects(
+      editorExport.exportEditedPdf({
+        sourceBytes:
+          await createPageDictionaryPayloadFixture(pageKey),
+        pages: [
+          {
+            ...blankPage,
+            sourcePageIndex: 0,
+            sourceWidth: 100,
+            sourceHeight: 120,
+          },
+        ],
+        elements: [],
+        filename: "flattened.pdf",
+      }),
+      /PDF previews can only be loaded in the browser/i,
+    );
+  });
+}
 
 test(
   "editor export rejects a deeply nested page tree before recursive enumeration",
@@ -201,6 +267,22 @@ test("editor export bounds the filename before sanitization", async () => {
   );
 });
 
+test("editor export honors cancellation before allocating the document", async () => {
+  const controller = new AbortController();
+  controller.abort();
+
+  await assert.rejects(
+    editorExport.exportEditedPdf({
+      sourceBytes: null,
+      pages: [blankPage],
+      elements: [],
+      filename: "cancelled.pdf",
+      signal: controller.signal,
+    }),
+    { name: "AbortError" },
+  );
+});
+
 test("editor export rejects text that would be silently truncated", async () => {
   await assert.rejects(
     editorExport.exportEditedPdf({
@@ -225,6 +307,7 @@ test("existing-text cleanup keeps immutable source geometry after a move", () =>
     rotation: 45,
     backgroundColor: "#000000",
     sourceText: {
+      kind: "native",
       id: "source-1",
       pageIndex: 0,
       originalText: "Original",
@@ -239,13 +322,128 @@ test("existing-text cleanup keeps immutable source geometry after a move", () =>
   };
 
   assert.deepEqual(editorExport.sourceTextCleanupGeometry(moved), {
-    backgroundColor: "#fefefe",
+    backgroundColor: "#000000",
     height: 0.05,
     rotation: 12,
     width: 0.3,
     x: 0.1,
     y: 0.2,
   });
+});
+
+test("Unicode wrapping keeps combining and emoji grapheme clusters intact", () => {
+  assert.deepEqual(
+    editorExport.splitTextGraphemes(
+      "e\u0301👨‍👩‍👧‍👦🇮🇹",
+    ),
+    ["e\u0301", "👨‍👩‍👧‍👦", "🇮🇹"],
+  );
+});
+
+test("Unicode wrapping measures Arabic words with contextual shaping", () => {
+  const contextualArabicFont = {
+    widthOfTextAtSize(text) {
+      const characters = [...text];
+      return characters.length === 1
+        ? 10
+        : characters.reduce(
+            (width, character) =>
+              width + (character === " " ? 2 : 4),
+            0,
+          );
+    },
+  };
+
+  const lines = editorExport.wrapPreparedTextRuns(
+    [preparedRun("سلام", contextualArabicFont, "rtl")],
+    12,
+    20,
+  );
+
+  assert.deepEqual(lines.map(lineText), ["سلام"]);
+  assert.equal(lines[0].direction, "rtl");
+  assert.equal(lines[0].width, 16);
+});
+
+test("Unicode wrapping prefers word boundaries and trims line spaces", () => {
+  const font = {
+    widthOfTextAtSize(text) {
+      return [...text].length;
+    },
+  };
+
+  const lines = editorExport.wrapPreparedTextRuns(
+    [preparedRun("hello world", font)],
+    12,
+    7,
+  );
+
+  assert.deepEqual(lines.map(lineText), ["hello", "world"]);
+});
+
+test("Unicode wrapping splits only an oversized token at grapheme boundaries", () => {
+  const font = {
+    widthOfTextAtSize(text) {
+      return [...text].length;
+    },
+  };
+
+  const lines = editorExport.wrapPreparedTextRuns(
+    [preparedRun("abcdefghij", font)],
+    12,
+    4,
+  );
+
+  assert.deepEqual(lines.map(lineText), ["abcd", "efgh", "ij"]);
+});
+
+test("Unicode wrapping preserves font runs across a split token", () => {
+  const firstFont = {
+    widthOfTextAtSize(text) {
+      return [...text].length;
+    },
+  };
+  const secondFont = {
+    widthOfTextAtSize(text) {
+      return [...text].length;
+    },
+  };
+
+  const lines = editorExport.wrapPreparedTextRuns(
+    [
+      preparedRun("ab", firstFont),
+      preparedRun("cd", secondFont),
+    ],
+    12,
+    3,
+  );
+
+  assert.deepEqual(lines.map(lineText), ["abc", "d"]);
+  assert.equal(lines[0].runs.length, 2);
+});
+
+test("Unicode wrapping stops bounded export work after the overflow line", () => {
+  let measuredCodeUnits = 0;
+  const font = {
+    widthOfTextAtSize(text) {
+      measuredCodeUnits += text.length;
+      return text.length;
+    },
+  };
+  const text = "a".repeat(100_000);
+
+  const lines = editorExport.wrapPreparedTextRuns(
+    [preparedRun(text, font)],
+    12,
+    1,
+    2,
+  );
+
+  assert.deepEqual(lines.map(lineText), ["a", "a"]);
+  assert.ok(
+    measuredCodeUnits < 100_100,
+    `expected bounded near-linear measurement, saw ${measuredCodeUnits} code units`,
+  );
 });
 
 test("editor export rejects oversized source bytes before copying them", async () => {

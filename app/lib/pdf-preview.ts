@@ -1,5 +1,6 @@
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
+import { createAbortError } from "./abort";
 import {
   describePdfSecurityLimitIssue,
   getFileLimitIssue,
@@ -24,12 +25,6 @@ interface LoadPdfPreviewOptions {
 interface DestroyableLoadingTask<Result> {
   promise: Promise<Result>;
   destroy: () => Promise<void>;
-}
-
-function createAbortError(): Error {
-  const error = new Error("PDF loading was aborted.");
-  error.name = "AbortError";
-  return error;
 }
 
 function createSecurityLimitError(
@@ -60,7 +55,7 @@ export async function waitForPdfLoadingTask<Result>(
 
   if (signal?.aborted) {
     await destroyOnce();
-    throw createAbortError();
+    throw createAbortError("PDF loading was aborted.");
   }
 
   let rejectAbort: ((reason: Error) => void) | null = null;
@@ -69,7 +64,7 @@ export async function waitForPdfLoadingTask<Result>(
   });
   const onAbort = () => {
     void destroyOnce();
-    rejectAbort?.(createAbortError());
+    rejectAbort?.(createAbortError("PDF loading was aborted."));
   };
   signal?.addEventListener("abort", onAbort, { once: true });
 
@@ -80,12 +75,14 @@ export async function waitForPdfLoadingTask<Result>(
     ]);
     if (signal?.aborted) {
       await destroyOnce();
-      throw createAbortError();
+      throw createAbortError("PDF loading was aborted.");
     }
     return document;
   } catch (error) {
     await destroyOnce();
-    if (signal?.aborted) throw createAbortError();
+    if (signal?.aborted) {
+      throw createAbortError("PDF loading was aborted.");
+    }
     throw error;
   } finally {
     signal?.removeEventListener("abort", onAbort);
@@ -124,7 +121,9 @@ export async function loadPdfPreview(
   if (fileIssue) throw createSecurityLimitError(fileIssue);
 
   const pdfjs = await loadPdfJsModule();
-  if (options.signal?.aborted) throw createAbortError();
+  if (options.signal?.aborted) {
+    throw createAbortError("PDF loading was aborted.");
+  }
 
   // PDF.js transfers the supplied buffer to its worker. Keep the editor's
   // source bytes intact so the same document can still be exported later.
