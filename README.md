@@ -48,8 +48,9 @@ cases intentionally use a safe flattened fallback; see
   Japanese, pure Arabic, pure Hebrew, and a reviewed symbol set; supported
   faces are subsetted except the explicitly tested Symbols 2 fallback.
 - **Document-first editor:** a full-viewport workspace with fit-page zoom,
-  collapsible desktop panels, native touch pan and pinch, and a focused mobile
-  text-replacement sheet that commits only after confirmation.
+  collapsible desktop panels, native touch pan and pinch, discoverable compact
+  tools, persistent drawing and markup, and a focused mobile text sheet that
+  adds or edits only after confirmation.
 - **Self-contained:** PDF.js worker, CMaps, fonts, and WebAssembly helpers are
   served from the same application instead of a third-party CDN.
 - **Security bounded:** file sizes, pages, rendering, text, images, ZIP output,

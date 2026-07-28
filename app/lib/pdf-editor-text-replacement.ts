@@ -23,6 +23,13 @@ export function applyFocusedTextReplacement(
   intent: FocusedTextEditIntent,
 ): FocusedTextReplacementResult {
   if (intent === "create") {
+    if (!draftedElement.sourceText && !draftedElement.text.trim()) {
+      return {
+        elementId: draftedElement.id,
+        outcome: "unchanged",
+        snapshot: current,
+      };
+    }
     const matchingSource = draftedElement.sourceText
       ? current.elements.find(
           (candidate) =>
@@ -79,6 +86,18 @@ export function applyFocusedTextReplacement(
       elementId: draftedElement.id,
       outcome: "missing",
       snapshot: current,
+    };
+  }
+  if (!existing.sourceText && !draftedElement.text.trim()) {
+    return {
+      elementId: draftedElement.id,
+      outcome: "applied",
+      snapshot: {
+        ...current,
+        elements: current.elements.filter(
+          (candidate) => candidate.id !== draftedElement.id,
+        ),
+      },
     };
   }
   if (

@@ -45,6 +45,16 @@ function textElement(overrides = {}) {
   };
 }
 
+function addedTextElement(overrides = {}) {
+  const element = textElement({
+    id: "added-text-1",
+    text: "Added text",
+    ...overrides,
+  });
+  Reflect.deleteProperty(element, "sourceText");
+  return element;
+}
+
 test("a focused create applies exactly one immutable replacement", () => {
   const current = { pages: [], elements: [] };
   const draft = textElement();
@@ -56,6 +66,35 @@ test("a focused create applies exactly one immutable replacement", () => {
   assert.equal(result.snapshot.elements[0], draft);
   assert.equal(result.elementId, draft.id);
   assert.equal(result.outcome, "applied");
+});
+
+test("a focused create applies exactly one immutable added-text element", () => {
+  const existing = textElement({ id: "existing-replacement" });
+  const current = { pages: [], elements: [existing] };
+  const draft = addedTextElement();
+  const result = applyFocusedTextReplacement(current, draft, "create");
+
+  assert.notEqual(result.snapshot, current);
+  assert.deepEqual(current.elements, [existing]);
+  assert.equal(result.snapshot.elements.length, 2);
+  assert.equal(result.snapshot.elements[0], existing);
+  assert.equal(result.snapshot.elements[1], draft);
+  assert.equal(result.snapshot.elements[1].sourceText, undefined);
+  assert.equal(result.elementId, draft.id);
+  assert.equal(result.outcome, "applied");
+});
+
+test("an empty focused create without source text does not persist an invisible element", () => {
+  const current = { pages: [], elements: [] };
+  const result = applyFocusedTextReplacement(
+    current,
+    addedTextElement({ text: "" }),
+    "create",
+  );
+
+  assert.equal(result.snapshot, current);
+  assert.deepEqual(result.snapshot.elements, []);
+  assert.equal(result.outcome, "unchanged");
 });
 
 test("rapid duplicate activation upserts the same source instead of appending", () => {
@@ -84,6 +123,31 @@ test("rapid duplicate activation upserts the same source instead of appending", 
   assert.equal(result.outcome, "applied");
 });
 
+test("a focused update modifies an added-text element immutably", () => {
+  const existing = addedTextElement({
+    text: "Before",
+    x: 0.2,
+  });
+  const sibling = textElement({ id: "source-replacement-sibling" });
+  const current = { pages: [], elements: [existing, sibling] };
+  const draft = addedTextElement({
+    text: "After",
+    direction: "rtl",
+    x: 0.45,
+  });
+  const result = applyFocusedTextReplacement(current, draft, "update");
+
+  assert.notEqual(result.snapshot, current);
+  assert.equal(result.snapshot.elements.length, 2);
+  assert.equal(result.snapshot.elements[0], draft);
+  assert.equal(result.snapshot.elements[1], sibling);
+  assert.equal(result.snapshot.elements[0].sourceText, undefined);
+  assert.equal(current.elements[0].text, "Before");
+  assert.equal(current.elements[0].x, 0.2);
+  assert.equal(result.elementId, draft.id);
+  assert.equal(result.outcome, "applied");
+});
+
 test("an update can remove text without deleting its immutable source repair", () => {
   const existing = textElement();
   const current = { pages: [], elements: [existing] };
@@ -102,6 +166,37 @@ test("an update can remove text without deleting its immutable source repair", (
   );
   assert.equal(current.elements[0].text, "Replacement");
   assert.equal(result.outcome, "applied");
+});
+
+test("clearing added text removes only that element", () => {
+  const existing = addedTextElement({ text: "Remove me" });
+  const sibling = textElement({ id: "source-replacement-sibling" });
+  const current = { pages: [], elements: [existing, sibling] };
+  const result = applyFocusedTextReplacement(
+    current,
+    addedTextElement({ text: "" }),
+    "update",
+  );
+
+  assert.notEqual(result.snapshot, current);
+  assert.deepEqual(result.snapshot.elements, [sibling]);
+  assert.equal(current.elements[0], existing);
+  assert.equal(result.elementId, existing.id);
+  assert.equal(result.outcome, "applied");
+});
+
+test("an unchanged added-text update preserves snapshot identity", () => {
+  const existing = addedTextElement();
+  const current = { pages: [], elements: [existing] };
+  const result = applyFocusedTextReplacement(
+    current,
+    addedTextElement(),
+    "update",
+  );
+
+  assert.equal(result.snapshot, current);
+  assert.equal(result.elementId, existing.id);
+  assert.equal(result.outcome, "unchanged");
 });
 
 test("unchanged and missing updates preserve snapshot identity", () => {

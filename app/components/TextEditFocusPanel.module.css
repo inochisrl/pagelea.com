@@ -179,6 +179,14 @@
   color: #fffefa;
 }
 
+.applyButton:disabled {
+  border-color: #aebbb4;
+  background: #c8d1cb;
+  box-shadow: none;
+  color: #69756e;
+  cursor: not-allowed;
+}
+
 .closeButton:focus-visible,
 .cancelButton:focus-visible,
 .applyButton:focus-visible {
