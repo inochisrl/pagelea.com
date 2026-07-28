@@ -8,6 +8,55 @@ and this project follows
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-07-28
+
+### Added
+
+- Added an explicit mobile More tools menu so Edit text, Highlight, Whiteout,
+  Shape, Image, and Sign remain reachable in both portrait and short landscape
+  layouts without relying on an invisible scrollbar.
+- Reused the transactional focused text sheet for new and previously added
+  text. Empty drafts cannot create invisible elements, Cancel leaves the
+  document and history untouched, and Save updates the existing element
+  instead of duplicating it.
+- Added direct compact-layout signature setup for typed, drawn, and uploaded
+  signatures, including accessible mode state and clear page-placement actions.
+
+### Changed
+
+- Keep Draw, Highlight, Whiteout, Shape, and drawn Signature active until the
+  user chooses Select or presses Escape, allowing consecutive marks and
+  multi-stroke signatures.
+- Give tap-created highlights, whiteouts, and shapes useful tool-specific
+  dimensions while preserving precise drag sizing.
+- Match preview and export opacity for highlights, and keep Whiteout fully
+  opaque in both paths.
+
+### Performance
+
+- Export every freehand or signature stroke as one rounded PDF path instead of
+  one PDF object per line segment. The regression suite covers the 4,096-point
+  per-stroke limit; a manual 100,000-point document benchmark produced a
+  smaller file that Pagelea could reopen while reducing measured export time
+  from 17.7 seconds to 0.69 seconds on the review machine.
+
+### Security
+
+- Reject non-finite drawing coordinates before PDF path serialization.
+
+### Fixed
+
+- Fixed Draw, Highlight, Whiteout, Shape, and drawn Signature returning to
+  Select after their first gesture, which made a second drag move the previous
+  mark instead of creating another.
+- Fixed pointer cancellation committing partial or nearly invisible marks.
+- Fixed simple Highlight taps creating a roughly three-pixel artifact despite
+  the interface promising click-or-drag placement.
+- Fixed compact Signature leaving its required name or upload controls inside a
+  closed properties sheet.
+- Fixed mobile toolbar state persisting as a clipped horizontal offset after
+  rotating into landscape.
+
 ## [0.4.2] - 2026-07-27
 
 ### Security

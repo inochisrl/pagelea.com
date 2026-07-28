@@ -874,6 +874,70 @@
   opacity: 0.42;
 }
 
+.moreToolsButton,
+.toolOverflowBackdrop,
+.toolOverflowMenu {
+  display: none;
+}
+
+.toolOverflowBackdrop {
+  position: fixed;
+  z-index: 90;
+  border: 0;
+  background: rgba(13, 22, 18, 0.28);
+  cursor: pointer;
+  inset: 0;
+  backdrop-filter: blur(1px);
+}
+
+.toolOverflowMenu {
+  position: fixed;
+  z-index: 91;
+  width: min(300px, calc(100vw - 20px));
+  max-height: min(430px, calc(100dvh - 90px));
+  gap: 4px;
+  overflow-y: auto;
+  border: 1px solid #cbd6cf;
+  border-radius: 18px;
+  background: #fffefa;
+  padding: 8px;
+  box-shadow: 0 22px 60px rgba(13, 22, 18, 0.28);
+}
+
+.toolOverflowMenu button {
+  display: grid;
+  min-height: 48px;
+  align-items: center;
+  gap: 10px;
+  grid-template-columns: 24px minmax(0, 1fr) 24px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  padding: 8px 12px;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 760;
+  text-align: left;
+}
+
+.toolOverflowMenu button:hover,
+.toolOverflowMenu button[aria-checked="true"] {
+  background: var(--mint);
+  color: var(--green-dark);
+}
+
+.toolOverflowMenu button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.toolOverflowMenu button:focus-visible {
+  outline: 3px solid rgba(45, 111, 232, 0.42);
+  outline-offset: 1px;
+}
+
 .textDetectionBadge {
   display: inline-flex;
   min-width: max-content;
@@ -1428,6 +1492,11 @@
   margin-inline: 0;
 }
 
+.signaturePanel > .secondaryButton {
+  width: 100%;
+  margin-top: 12px;
+}
+
 .signatureTabs {
   margin-bottom: 12px;
 }
@@ -1811,6 +1880,24 @@
     height: 52px;
   }
 
+  .immersive .mobileSecondaryTool {
+    display: none;
+  }
+
+  .immersive .moreToolsButton {
+    display: inline-grid;
+  }
+
+  .immersive .toolOverflowBackdrop {
+    display: block;
+  }
+
+  .immersive .toolOverflowMenu {
+    right: 64px;
+    bottom: calc(74px + env(safe-area-inset-bottom));
+    display: grid;
+  }
+
   .immersive .textDetectionBadge {
     display: none;
   }
@@ -2050,6 +2137,27 @@
     height: 50px;
   }
 
+  .immersive .mobileSecondaryTool {
+    display: none;
+  }
+
+  .immersive .moreToolsButton {
+    display: inline-grid;
+  }
+
+  .immersive .toolOverflowBackdrop {
+    display: block;
+  }
+
+  .immersive .toolOverflowMenu {
+    right: auto;
+    bottom: 10px;
+    left: 72px;
+    display: grid;
+    width: min(280px, calc(100vw - 84px));
+    max-height: calc(100dvh - 20px);
+  }
+
   .immersive .panelToggle {
     width: 64px;
     min-width: 64px;
@@ -2062,6 +2170,27 @@
 @media (max-width: 760px) and (max-height: 520px) and (orientation: landscape) {
   .immersive .canvasScroller {
     padding: 70px 12px 12px;
+  }
+}
+
+@media (max-width: 350px) and (orientation: portrait) {
+  .immersive .panelToggle {
+    min-width: 52px;
+  }
+
+  .immersive .toolRail {
+    gap: 2px;
+    padding-inline: 3px;
+  }
+
+  .immersive .toolButton {
+    width: 48px;
+    min-width: 48px;
+    padding-inline: 3px;
+  }
+
+  .immersive .toolOverflowMenu {
+    right: 10px;
   }
 }
 

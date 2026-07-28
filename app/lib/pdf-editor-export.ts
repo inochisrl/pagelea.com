@@ -1,4 +1,6 @@
 import {
+  LineCapStyle,
+  LineJoinStyle,
   PDFArray,
   PDFContentStream,
   PDFDict,
@@ -14,6 +16,7 @@ import {
   popGraphicsState,
   pushGraphicsState,
   rgb,
+  setLineJoin,
   setLineWidth,
   setStrokingRgbColor,
   setTextRenderingMode,
@@ -2957,9 +2960,7 @@ function drawRectElement(
   const borderColor = whiteout ? undefined : parseColor(element.stroke);
   const opacity = whiteout
     ? 1
-    : highlight
-      ? Math.min(safeOpacity(element.opacity), 0.55)
-      : safeOpacity(element.opacity);
+    : safeOpacity(element.opacity);
   const borderWidth = borderColor
     ? clamp(element.strokeWidth, 0, 72)
     : 0;
@@ -3040,16 +3041,43 @@ function drawPathElement(
   const color = parseColor(element.color) ?? rgb(0.09, 0.13, 0.11);
   const thickness = clamp(element.strokeWidth, 0.25, 72);
   const opacity = safeOpacity(element.opacity);
-
-  for (let index = 1; index < points.length; index += 1) {
-    page.drawLine({
-      start: points[index - 1],
-      end: points[index],
-      thickness,
-      color,
-      opacity,
-    });
+  if (
+    points.some(
+      (point) =>
+        !Number.isFinite(point.x) || !Number.isFinite(point.y),
+    )
+  ) {
+    throw new Error("A drawing annotation contains invalid coordinates.");
   }
+
+  /*
+   * One editor stroke must remain one PDF path. Calling drawLine for every
+   * pair of points creates one graphics-state dictionary per segment; a valid
+   * document at the path-point limit can then exceed Pagelea's own PDF object
+   * graph budget when it is opened again. SVG paths use a top-left Y axis, so
+   * negate the already mapped PDF-space Y coordinate before handing the path
+   * to pdf-lib.
+   */
+  const path = points
+    .map(
+      (point, index) =>
+        `${index === 0 ? "M" : "L"} ${point.x} ${-point.y}`,
+    )
+    .join(" ");
+
+  page.pushOperators(
+    pushGraphicsState(),
+    setLineJoin(LineJoinStyle.Round),
+  );
+  page.drawSvgPath(path, {
+    x: 0,
+    y: 0,
+    borderColor: color,
+    borderLineCap: LineCapStyle.Round,
+    borderOpacity: opacity,
+    borderWidth: thickness,
+  });
+  page.pushOperators(popGraphicsState());
 }
 
 interface ImageDataParts {

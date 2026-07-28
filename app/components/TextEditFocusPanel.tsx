@@ -9,6 +9,8 @@ import {
 
 import styles from "./TextEditFocusPanel.module.css";
 
+export type FocusedTextEditVariant = "add" | "edit" | "replace";
+
 type TextEditFocusPanelProps = {
   direction: "ltr" | "rtl";
   errorMessage: string;
@@ -20,6 +22,7 @@ type TextEditFocusPanelProps = {
   originalText: string;
   panelRef: RefObject<HTMLElement | null>;
   text: string;
+  variant: FocusedTextEditVariant;
 };
 
 function trapDialogFocus(event: KeyboardEvent<HTMLElement>) {
@@ -53,7 +56,38 @@ export default function TextEditFocusPanel({
   originalText,
   panelRef,
   text,
+  variant,
 }: TextEditFocusPanelProps) {
+  const isEmptyAddition = variant === "add" && !text.trim();
+  const copy =
+    variant === "add"
+      ? {
+          action: "Add text",
+          cancelLabel: "Cancel adding text",
+          description:
+            "Write comfortably without changing the page zoom. The text is added only when you confirm.",
+          fieldLabel: "Text",
+          title: "Add text",
+        }
+      : variant === "edit"
+        ? {
+            action: !text.trim() ? "Remove text" : "Save text",
+            cancelLabel: "Cancel text editing",
+            description:
+              "Edit without changing the page zoom. Nothing changes until you confirm.",
+            fieldLabel: "New text",
+            title: "Edit text",
+          }
+        : {
+            action:
+              text.length === 0 ? "Remove text" : "Replace text",
+            cancelLabel: "Cancel text replacement",
+            description:
+              "Edit without changing the page zoom. Nothing changes until you confirm.",
+            fieldLabel: "New text",
+            title: "Replace text",
+          };
+
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       inputRef.current?.focus({ preventScroll: true });
@@ -72,7 +106,7 @@ export default function TextEditFocusPanel({
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
       event.preventDefault();
       event.stopPropagation();
-      onApply();
+      if (!isEmptyAddition) onApply();
       return;
     }
     trapDialogFocus(event);
@@ -106,14 +140,13 @@ export default function TextEditFocusPanel({
             <TextCursorInput size={19} />
           </span>
           <div>
-            <h2 id="focused-text-editor-title">Replace text</h2>
+            <h2 id="focused-text-editor-title">{copy.title}</h2>
             <p id="focused-text-editor-description">
-              Edit without changing the page zoom. Nothing changes until you
-              confirm.
+              {copy.description}
             </p>
           </div>
           <button
-            aria-label="Cancel text replacement"
+            aria-label={copy.cancelLabel}
             className={styles.closeButton}
             onClick={onCancel}
             type="button"
@@ -122,13 +155,15 @@ export default function TextEditFocusPanel({
           </button>
         </header>
 
-        <div className={styles.original}>
-          <span>Original</span>
-          <p dir="auto">{originalText || "Empty text"}</p>
-        </div>
+        {variant === "add" ? null : (
+          <div className={styles.original}>
+            <span>Original</span>
+            <p dir="auto">{originalText || "Empty text"}</p>
+          </div>
+        )}
 
         <label className={styles.field}>
-          <span>New text</span>
+          <span>{copy.fieldLabel}</span>
           <textarea
             autoCapitalize="off"
             autoComplete="off"
@@ -161,8 +196,13 @@ export default function TextEditFocusPanel({
           >
             Cancel
           </button>
-          <button className={styles.applyButton} onClick={onApply} type="button">
-            {text.length === 0 ? "Remove text" : "Replace text"}
+          <button
+            className={styles.applyButton}
+            disabled={isEmptyAddition}
+            onClick={onApply}
+            type="button"
+          >
+            {copy.action}
           </button>
         </footer>
       </section>

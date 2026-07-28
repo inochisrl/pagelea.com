@@ -12,6 +12,7 @@ import {
   PDFDict,
   PDFDocument,
   PDFName,
+  PDFNumber,
   PDFRawStream,
   PDFStream,
   StandardFonts,
@@ -238,6 +239,200 @@ function decodedPageContent(document, page) {
     })
     .join("\n");
 }
+
+function pageStrokeOpacities(document, page) {
+  const graphicsStates = page.node
+    .Resources()
+    ?.lookupMaybe(PDFName.of("ExtGState"), PDFDict);
+  if (!graphicsStates) return [];
+
+  return graphicsStates
+    .entries()
+    .flatMap(([, value]) => {
+      const dictionary = document.context.lookup(value, PDFDict);
+      const opacity = dictionary.lookupMaybe(
+        PDFName.of("CA"),
+        PDFNumber,
+      );
+      return opacity ? [opacity.asNumber()] : [];
+    });
+}
+
+test("shape, highlight, draw, and signature export as ordered vector markup", async () => {
+  const blankPage = {
+    ...pageModel,
+    sourcePageIndex: null,
+  };
+  const elements = [
+    {
+      id: "shape-1",
+      pageId: blankPage.id,
+      type: "shape",
+      x: 0.1,
+      y: 0.1,
+      width: 0.2,
+      height: 0.2,
+      opacity: 1,
+      rotation: 0,
+      fill: "#c8f2df",
+      stroke: "#0f9f6e",
+      strokeWidth: 2,
+    },
+    {
+      id: "highlight-1",
+      pageId: blankPage.id,
+      type: "highlight",
+      x: 0.1,
+      y: 0.4,
+      width: 0.3,
+      height: 0.1,
+      opacity: 0.85,
+      rotation: 0,
+      fill: "#ffe15d",
+      stroke: "transparent",
+      strokeWidth: 0,
+    },
+    {
+      id: "draw-1",
+      pageId: blankPage.id,
+      type: "draw",
+      x: 0.1,
+      y: 0.6,
+      width: 0.3,
+      height: 0.15,
+      opacity: 0.7,
+      rotation: 0,
+      points: [
+        { x: 0, y: 0 },
+        { x: 0.5, y: 1 },
+        { x: 1, y: 0 },
+      ],
+      color: "#17221e",
+      strokeWidth: 2.2,
+    },
+    {
+      id: "signature-1",
+      pageId: blankPage.id,
+      type: "signature",
+      x: 0.55,
+      y: 0.6,
+      width: 0.3,
+      height: 0.15,
+      opacity: 0.8,
+      rotation: 0,
+      points: [
+        { x: 0, y: 1 },
+        { x: 0.4, y: 0 },
+        { x: 1, y: 0.8 },
+      ],
+      color: "#123456",
+      strokeWidth: 2.8,
+    },
+  ];
+
+  const result = await rawEditorExport.exportEditedPdf({
+    sourceBytes: null,
+    pages: [blankPage],
+    elements,
+    filename: "vector-markup.pdf",
+  });
+  const output = await PDFDocument.load(
+    new Uint8Array(await result.blob.arrayBuffer()),
+    { updateMetadata: false },
+  );
+  const page = output.getPage(0);
+  const content = decodedPageContent(output, page);
+  const shapeIndex = content.indexOf("\nB\n");
+  const highlightIndex = content.indexOf("\nf\n");
+  const strokeIndexes = [...content.matchAll(/\nS\n/g)].map(
+    (match) => match.index ?? -1,
+  );
+
+  assert.ok(shapeIndex >= 0, "shape remains a filled and stroked vector");
+  assert.ok(
+    highlightIndex > shapeIndex,
+    "highlight is drawn after the shape",
+  );
+  assert.equal(strokeIndexes.length, 2);
+  assert.ok(
+    strokeIndexes[0] > highlightIndex &&
+      strokeIndexes[1] > strokeIndexes[0],
+    "draw and signature preserve their layer order",
+  );
+  assert.equal((content.match(/\n1 J\n/g) ?? []).length, 2);
+  assert.equal((content.match(/\n1 j\n/g) ?? []).length, 2);
+  assert.equal((content.match(/\n2\.2 w\n/g) ?? []).length, 1);
+  assert.equal((content.match(/\n2\.8 w\n/g) ?? []).length, 1);
+
+  const strokeOpacities = pageStrokeOpacities(output, page);
+  for (const expected of [0.85, 0.7, 0.8]) {
+    assert.ok(
+      strokeOpacities.some(
+        (opacity) => Math.abs(opacity - expected) < 1e-9,
+      ),
+      `expected vector opacity ${expected}`,
+    );
+  }
+});
+
+test("a maximum-size freehand stroke uses one bounded PDF path", async () => {
+  const blankPage = {
+    ...pageModel,
+    sourcePageIndex: null,
+  };
+  const maximumPointCount = 4_096;
+  const points = Array.from(
+    { length: maximumPointCount },
+    (_, index) => ({
+      x: index / (maximumPointCount - 1),
+      y: 0.5 + Math.sin(index / 20) * 0.4,
+    }),
+  );
+
+  const result = await rawEditorExport.exportEditedPdf({
+    sourceBytes: null,
+    pages: [blankPage],
+    elements: [
+      {
+        id: "maximum-stroke",
+        pageId: blankPage.id,
+        type: "draw",
+        x: 0.05,
+        y: 0.1,
+        width: 0.9,
+        height: 0.8,
+        opacity: 0.6,
+        rotation: 0,
+        points,
+        color: "#17221e",
+        strokeWidth: 2.2,
+      },
+    ],
+    filename: "maximum-stroke.pdf",
+  });
+  const output = await PDFDocument.load(
+    new Uint8Array(await result.blob.arrayBuffer()),
+    { updateMetadata: false },
+  );
+  const page = output.getPage(0);
+  const content = decodedPageContent(output, page);
+  const graphicsStates = page.node
+    .Resources()
+    ?.lookupMaybe(PDFName.of("ExtGState"), PDFDict);
+
+  assert.equal((content.match(/\nS\n/g) ?? []).length, 1);
+  assert.equal(
+    (content.match(/\sl\n/g) ?? []).length,
+    maximumPointCount - 1,
+  );
+  assert.equal((content.match(/\n1 J\n/g) ?? []).length, 1);
+  assert.equal((content.match(/\n1 j\n/g) ?? []).length, 1);
+  assert.equal(
+    graphicsStates?.entries().length ?? 0,
+    1,
+    "one stroke must not allocate one graphics state per segment",
+  );
+});
 
 test("existing-text export preserves unedited vectors and removes the old searchable glyphs", async () => {
   const original = await sourcePdf([

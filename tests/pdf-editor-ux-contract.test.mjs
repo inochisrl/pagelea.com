@@ -183,11 +183,53 @@ test("editor exposes a coherent keyboard interaction contract", () => {
   assert.match(undoBranch, /!isEditableTarget\(event\.target\)/);
 });
 
+test("compact tools stay discoverable and continuous gestures stay active", () => {
+  assert.match(editorSource, /aria-controls="pdf-more-tools-menu"/);
+  assert.match(editorSource, /aria-label="More editing tools"/);
+  assert.match(editorSource, /role="menuitemradio"/);
+  assert.match(editorSource, /MOBILE_PRIMARY_TOOL_IDS/);
+  assert.match(
+    editorCss,
+    /\.immersive \.mobileSecondaryTool\s*\{[\s\S]*?display:\s*none;/,
+  );
+  assert.match(
+    editorCss,
+    /\.immersive \.moreToolsButton\s*\{[\s\S]*?display:\s*inline-grid;/,
+  );
+  assert.match(
+    editorCss,
+    /@media \(max-width: 350px\) and \(orientation: portrait\)[\s\S]*?\.immersive \.toolButton\s*\{[\s\S]*?min-width:\s*48px;/,
+  );
+  assert.match(editorSource, /function onMoreToolsMenuKeyDown/);
+  assert.match(editorSource, /event\.key === "ArrowDown"/);
+  assert.match(editorSource, /event\.key === "Home"/);
+  assert.match(editorSource, /event\.key === "Tab"/);
+  assert.match(editorSource, /isPersistentCreationTool/);
+  assert.match(editorSource, /event\.type === "pointercancel"/);
+  assert.match(
+    editorSource,
+    /event\.type === "pointercancel"[\s\S]*?assignSnapshot\(interaction\.snapshot\)/,
+  );
+  assert.match(editorSource, /editorRectFromTap/);
+  assert.match(editorSource, /aria-pressed=\{signatureMode === item\}/);
+  assert.match(editorSource, /Draw on page/);
+});
+
 test("mobile existing-text editing is focused, accessible, and transactional", () => {
   assert.match(focusedTextEditorSource, /role="dialog"/);
   assert.match(focusedTextEditorSource, /aria-modal="true"/);
   assert.match(focusedTextEditorSource, />Original</);
-  assert.match(focusedTextEditorSource, />New text</);
+  assert.match(focusedTextEditorSource, /fieldLabel: "New text"/);
+  assert.match(
+    focusedTextEditorSource,
+    /FocusedTextEditVariant = "add" \| "edit" \| "replace"/,
+  );
+  assert.match(focusedTextEditorSource, /variant === "add"/);
+  assert.match(focusedTextEditorSource, /disabled=\{isEmptyAddition\}/);
+  assert.match(
+    focusedTextEditorSource,
+    /action: !text\.trim\(\) \? "Remove text" : "Save text"/,
+  );
   assert.match(focusedTextEditorSource, /Nothing changes until you/);
   assert.match(focusedTextEditorSource, /onCancel/);
   assert.match(focusedTextEditorSource, /onApply/);
