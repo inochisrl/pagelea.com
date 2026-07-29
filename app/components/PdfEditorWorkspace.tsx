@@ -651,6 +651,17 @@ function isEditableTarget(target: EventTarget | null) {
   );
 }
 
+function isInteractiveControlTarget(target: EventTarget | null) {
+  return (
+    target instanceof HTMLElement &&
+    Boolean(
+      target.closest(
+        'button, a[href], input, textarea, select, summary, [contenteditable="true"], [role="button"], [role^="menuitem"], [role="option"], [role="checkbox"], [role="radio"], [role="switch"], [role="slider"]',
+      ),
+    )
+  );
+}
+
 function imageFileToDataUrl(file: File, signal: AbortSignal) {
   return new Promise<string>((resolve, reject) => {
     if (signal.aborted) {
@@ -840,6 +851,7 @@ export default function PdfEditorWorkspace({
   } | null>(null);
   const keyboardActionsRef = useRef<{
     cancelFocusedTextEditing: () => void;
+    confirmSelectedElement: () => void;
     deleteSelected: () => void;
     editingTextId: string | null;
     focusedTextEditing: boolean;
@@ -1022,6 +1034,10 @@ export default function PdfEditorWorkspace({
     null;
   const selectedElement =
     snapshot.elements.find((element) => element.id === selectedId) ?? null;
+  const persistentCreationActive = isPersistentCreationTool(
+    tool,
+    tool === "signature" && signatureMode === "draw",
+  );
   const activePageElements = useMemo(
     () =>
       activePage
@@ -1907,9 +1923,61 @@ export default function PdfEditorWorkspace({
     setSelectedId(null);
   }
 
+  function focusEditorElement(elementId: string | null) {
+    if (!elementId) return;
+    window.requestAnimationFrame(() => {
+      const elements =
+        surfaceRef.current?.querySelectorAll<HTMLElement>(
+          "[data-editor-element-id]",
+        ) ?? [];
+      const target = Array.from(elements).find(
+        (element) => element.dataset.editorElementId === elementId,
+      );
+      target?.focus({ preventScroll: true });
+    });
+  }
+
+  function finishCreationMode(
+    {
+      clearSelection = false,
+      closeProperties = false,
+    }: {
+      clearSelection?: boolean;
+      closeProperties?: boolean;
+    } = {},
+  ) {
+    if (interactionRef.current) return;
+    finishInspectorEditing();
+    finishTextEditing();
+    setMoreToolsOpen(false);
+    setError("");
+    setTool("select");
+    if (clearSelection) {
+      setSelectedId(null);
+    } else {
+      focusEditorElement(selectedId);
+    }
+    if (compactLayout && closeProperties) setOpenPanel(null);
+    setProgress({
+      value: 100,
+      label: clearSelection
+        ? "Element ready · saved locally"
+        : "Creation finished · drag the selected element to move it",
+    });
+  }
+
+  function confirmSelectedElement() {
+    if (!selectedId) return;
+    finishCreationMode({
+      clearSelection: true,
+      closeProperties: true,
+    });
+  }
+
   useEffect(() => {
     keyboardActionsRef.current = {
       cancelFocusedTextEditing,
+      confirmSelectedElement,
       deleteSelected,
       editingTextId,
       focusedTextEditing: focusedTextEdit !== null,
@@ -1958,6 +2026,16 @@ export default function PdfEditorWorkspace({
       ) {
         event.preventDefault();
         actions.deleteSelected();
+        return;
+      }
+      if (
+        event.key === "Enter" &&
+        actions.selectedId &&
+        !isInteractiveControlTarget(event.target)
+      ) {
+        event.preventDefault();
+        actions.confirmSelectedElement();
+        return;
       }
       if (event.key === "Escape") {
         setOpenPanel(null);
@@ -2245,10 +2323,20 @@ export default function PdfEditorWorkspace({
   }
 
   function selectTool(nextTool: EditorTool) {
+    if (nextTool === tool && persistentCreationActive) {
+      finishCreationMode();
+      return;
+    }
     finishInspectorEditing();
     finishTextEditing();
     setMoreToolsOpen(false);
     setError("");
+    if (nextTool === "select") {
+      setPendingImage(null);
+      setTool("select");
+      focusEditorElement(selectedId);
+      return;
+    }
     setSelectedId(null);
     if (nextTool === "edit-text" && activePage?.sourcePageIndex === null) {
       setError(
@@ -2461,6 +2549,7 @@ export default function PdfEditorWorkspace({
         width: 0.38,
         height: 0.1,
         opacity: 1,
+        purpose: "signature",
         text: signatureName.trim(),
         fontSize: 34,
         fontFamily: "Helvetica",
@@ -2483,6 +2572,7 @@ export default function PdfEditorWorkspace({
         width: 0.34,
         height: 0.14,
         opacity: 1,
+        purpose: "signature",
         dataUrl: pendingImage.dataUrl,
         pixelCount: pendingImage.pixelCount,
       };
@@ -2497,7 +2587,15 @@ export default function PdfEditorWorkspace({
     if (next === before) return;
     setSelectedId(id);
     setTool("select");
+    focusEditorElement(id);
     if (element.type === "image") setPendingImage(null);
+    setProgress({
+      value: 100,
+      label:
+        element.purpose === "signature"
+          ? "Signature added · drag it to move or press Enter to finish"
+          : "Element added · drag it to move or press Enter to finish",
+    });
   }
 
   function beginExistingTextEdit(
@@ -2751,7 +2849,13 @@ export default function PdfEditorWorkspace({
       }
       return;
     }
-    if (tool !== "select") return;
+    const leavingCreationToMove =
+      kind === "move" &&
+      selectedId === element.id &&
+      persistentCreationActive &&
+      event.currentTarget.dataset.touchMoveHandle === "true";
+    if (tool !== "select" && !leavingCreationToMove) return;
+    if (leavingCreationToMove) finishCreationMode();
     if (
       event.pointerType === "touch" &&
       kind === "move" &&
@@ -2789,6 +2893,7 @@ export default function PdfEditorWorkspace({
   ) {
     const canUseFocusedEditor =
       element.type === "text" &&
+      element.purpose !== "signature" &&
       (compactLayout || preferFocusedEditor);
     if (
       canUseFocusedEditor &&
@@ -3098,7 +3203,7 @@ export default function PdfEditorWorkspace({
       setError("");
       setProgress({
         value: 100,
-        label: "Element added · tool stays active",
+        label: "Element added · drag it to move or press Enter to finish",
       });
       if (
         !isPersistentCreationTool(
@@ -3107,6 +3212,7 @@ export default function PdfEditorWorkspace({
         )
       ) {
         setTool("select");
+        focusEditorElement(interaction.elementId);
       }
       return;
     }
@@ -3127,7 +3233,7 @@ export default function PdfEditorWorkspace({
       setError("");
       setProgress({
         value: 100,
-        label: "Stroke added · tool stays active",
+        label: "Stroke added · draw another or press Enter to finish",
       });
       if (
         !isPersistentCreationTool(
@@ -3137,6 +3243,7 @@ export default function PdfEditorWorkspace({
       ) {
         setTool("select");
       }
+      focusEditorElement(interaction.elementId);
       return;
     }
 
@@ -3144,6 +3251,7 @@ export default function PdfEditorWorkspace({
       remember(interaction.snapshot);
     }
     setTool("select");
+    focusEditorElement(interaction.elementId);
   }
 
   function addBlankPage() {
@@ -3468,6 +3576,10 @@ export default function PdfEditorWorkspace({
     const display = pageDisplaySize(activePage);
     const pixelScale = (720 * zoom) / display.width;
     const selected = element.id === selectedId;
+    const elementDisplayType =
+      element.type === "signature" || element.purpose === "signature"
+        ? "signature"
+        : element.type;
     const commonStyle = {
       left: `${element.x * 100}%`,
       top: `${element.y * 100}%`,
@@ -3619,13 +3731,14 @@ export default function PdfEditorWorkspace({
 
     return (
       <div
-        aria-label={`${element.type} element. Use arrow keys to move and Shift plus arrow keys to resize.`}
+        aria-label={`${elementDisplayType} element. Use arrow keys to move and Shift plus arrow keys to resize.`}
         aria-pressed={selected}
         className={`${styles.editorElement} ${
           selected ? styles.selectedElement : ""
         }`}
         data-editor-element
         data-editor-element-id={element.id}
+        data-editor-element-type={elementDisplayType}
         key={element.id}
         onClick={(event) => {
           if (
@@ -3662,15 +3775,22 @@ export default function PdfEditorWorkspace({
         onDoubleClick={(event) => {
           if (
             compactLayout &&
-            element.type === "text"
+            element.type === "text" &&
+            element.purpose !== "signature"
           ) {
             openFocusedTextEditor(
               element,
               "update",
               event.currentTarget,
             );
-          } else if (element.type === "text") beginTextEditing(element.id);
-          else setSelectedId(element.id);
+          } else if (
+            element.type === "text" &&
+            element.purpose !== "signature"
+          ) {
+            beginTextEditing(element.id);
+          } else {
+            setSelectedId(element.id);
+          }
         }}
         onPointerDown={(event) =>
           beginElementInteraction(event, element, "move")
@@ -3678,6 +3798,7 @@ export default function PdfEditorWorkspace({
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
+            event.stopPropagation();
             if (
               tool === "edit-text" &&
               element.type === "text" &&
@@ -3694,13 +3815,22 @@ export default function PdfEditorWorkspace({
             if (
               event.key === "Enter" &&
               compactLayout &&
-              element.type === "text"
+              element.type === "text" &&
+              element.purpose !== "signature"
             ) {
               openFocusedTextEditor(
                 element,
                 "update",
                 event.currentTarget,
               );
+              return;
+            }
+            if (
+              event.key === "Enter" &&
+              selected &&
+              (tool === "select" || persistentCreationActive)
+            ) {
+              confirmSelectedElement();
               return;
             }
             setSelectedId(element.id);
@@ -3752,6 +3882,7 @@ export default function PdfEditorWorkspace({
         style={commonStyle}
         tabIndex={
           tool === "select" ||
+          (selected && persistentCreationActive) ||
           (tool === "edit-text" &&
             element.type === "text" &&
             Boolean(element.sourceText))
@@ -3761,8 +3892,8 @@ export default function PdfEditorWorkspace({
       >
         {content}
         {selected &&
-        compactLayout &&
-        tool === "select" ? (
+        ((compactLayout && tool === "select") ||
+          persistentCreationActive) ? (
           <span
             aria-hidden="true"
             className={styles.moveHandle}
@@ -4365,8 +4496,8 @@ export default function PdfEditorWorkspace({
         <section className={styles.stage} aria-label="PDF editor canvas">
           <p className={styles.srOnly} id="pdf-editor-keyboard-instructions">
             Select an added element with Tab. Use the arrow keys to move it,
-            Shift plus arrow keys to resize it, and Delete to remove it. Hold
-            Alt for finer movement.
+            Shift plus arrow keys to resize it, Enter to finish editing, and
+            Delete to remove it. Hold Alt for finer movement.
           </p>
           <div
             aria-label="Document controls"
@@ -4594,22 +4725,34 @@ export default function PdfEditorWorkspace({
                 </div>
               </>
             ) : null}
-            <button
-              aria-controls="pdf-properties-panel"
-              aria-expanded={
-                compactLayout
-                  ? openPanel === "properties"
-                  : !propertiesCollapsed
-              }
-              aria-label="Element properties"
-              className={styles.panelToggle}
-              onClick={() => toggleWorkspacePanel("properties")}
-              ref={propertiesToggleRef}
-              type="button"
-            >
-              <SlidersHorizontal size={18} />
-              <span>Props</span>
-            </button>
+            {persistentCreationActive && selectedElement ? (
+              <button
+                aria-label="Finish drawing"
+                className={`${styles.panelToggle} ${styles.creationDoneToggle}`}
+                onClick={confirmSelectedElement}
+                type="button"
+              >
+                <Check size={18} />
+                <span>Done</span>
+              </button>
+            ) : (
+              <button
+                aria-controls="pdf-properties-panel"
+                aria-expanded={
+                  compactLayout
+                    ? openPanel === "properties"
+                    : !propertiesCollapsed
+                }
+                aria-label="Element properties"
+                className={styles.panelToggle}
+                onClick={() => toggleWorkspacePanel("properties")}
+                ref={propertiesToggleRef}
+                type="button"
+              >
+                <SlidersHorizontal size={18} />
+                <span>Props</span>
+              </button>
+            )}
           </div>
 
           <div className={styles.canvasViewport}>
@@ -4669,11 +4812,15 @@ export default function PdfEditorWorkspace({
                             ? "Tap an outlined text block to replace it in a focused editor."
                             : "Click an outlined text block, then type directly on the page."
                   : tool === "select"
-                    ? "Select an element to move, resize, or style it."
+                    ? selectedElement
+                      ? "Drag the selected element to move it. Press Enter or Done when you are finished."
+                      : "Select an element to move, resize, or style it."
                     : tool === "draw" ||
                         (tool === "signature" &&
                           signatureMode === "draw")
-                      ? "Drag directly on the page."
+                      ? selectedElement
+                        ? "Draw another stroke, or press Enter or Done to finish."
+                        : "Drag directly on the page."
                       : tool === "image" ||
                           (tool === "signature" &&
                             signatureMode === "upload")
@@ -4721,14 +4868,32 @@ export default function PdfEditorWorkspace({
                   ? selectedElement.type === "text" &&
                     selectedElement.sourceText
                     ? "Existing text"
-                    : selectedElement.type
+                    : selectedElement.type === "signature" ||
+                        selectedElement.purpose === "signature"
+                      ? "signature"
+                      : selectedElement.type
                   : tool === "signature"
                     ? "Signature"
                     : "Nothing selected"}
               </strong>
             </div>
             <div className={styles.inspectorHeaderActions}>
-              {selectedElement ? <Check size={18} /> : null}
+              {selectedElement ? (
+                <button
+                  aria-label={`Done editing ${
+                    selectedElement.type === "signature" ||
+                    selectedElement.purpose === "signature"
+                      ? "signature"
+                      : selectedElement.type
+                  }`}
+                  className={styles.inspectorDone}
+                  onClick={confirmSelectedElement}
+                  title="Done"
+                  type="button"
+                >
+                  <Check size={19} />
+                </button>
+              ) : null}
               <button
                 aria-label={
                   compactLayout
@@ -4816,7 +4981,8 @@ export default function PdfEditorWorkspace({
                 <>
                   <p className={styles.inspectorEmpty}>
                     Draw your signature directly on the document. Add as many
-                    strokes as you need, then choose Select to move them.
+                    strokes as you need, then press Enter or Done before moving
+                    them.
                   </p>
                   <button
                     className={styles.secondaryButton}
@@ -4825,7 +4991,7 @@ export default function PdfEditorWorkspace({
                       setProgress({
                         value: 100,
                         label:
-                          "Draw your signature · the tool stays active",
+                          "Draw your signature · press Enter or Done to finish",
                       });
                     }}
                     type="button"

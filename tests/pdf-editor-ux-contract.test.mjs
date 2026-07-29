@@ -183,7 +183,7 @@ test("editor exposes a coherent keyboard interaction contract", () => {
   assert.match(undoBranch, /!isEditableTarget\(event\.target\)/);
 });
 
-test("compact tools stay discoverable and continuous gestures stay active", () => {
+test("compact tools expose a coherent create, move, and finish flow", () => {
   assert.match(editorSource, /aria-controls="pdf-more-tools-menu"/);
   assert.match(editorSource, /aria-label="More editing tools"/);
   assert.match(editorSource, /role="menuitemradio"/);
@@ -213,6 +213,52 @@ test("compact tools stay discoverable and continuous gestures stay active", () =
   assert.match(editorSource, /editorRectFromTap/);
   assert.match(editorSource, /aria-pressed=\{signatureMode === item\}/);
   assert.match(editorSource, /Draw on page/);
+  assert.match(editorSource, /function finishCreationMode/);
+  assert.match(editorSource, /function confirmSelectedElement/);
+  assert.match(editorSource, /leavingCreationToMove/);
+  assert.match(
+    editorSource,
+    /leavingCreationToMove[\s\S]*?dataset\.touchMoveHandle === "true"/,
+  );
+  assert.match(
+    editorSource,
+    /data-editor-element-type=\{elementDisplayType\}/,
+  );
+  assert.match(editorSource, /aria-label="Finish drawing"/);
+  assert.match(editorSource, /className=\{styles\.inspectorDone\}/);
+  assert.match(editorSource, /onClick=\{confirmSelectedElement\}/);
+  assert.match(editorSource, /purpose:\s*"signature"/);
+  assert.match(editorSource, /element\.purpose !== "signature"/);
+  assert.match(
+    editorSource,
+    /Signature added · drag it to move or press Enter to finish/,
+  );
+  assert.match(
+    editorSource,
+    /event\.key === "Enter"[\s\S]*?actions\.confirmSelectedElement\(\)/,
+  );
+  assert.match(editorSource, /function isInteractiveControlTarget/);
+  assert.match(
+    editorSource,
+    /event\.key === "Enter"[\s\S]*?!isInteractiveControlTarget\(event\.target\)/,
+  );
+  assert.match(
+    editorSource,
+    /event\.key === "Enter" \|\| event\.key === " "[\s\S]*?event\.stopPropagation\(\)/,
+  );
+  assert.match(
+    editorSource,
+    /Element added · drag it to move or press Enter to finish/,
+  );
+  assert.doesNotMatch(editorSource, /Element added · tool stays active/);
+  assert.match(
+    editorCss,
+    /\.inspectorDone\s*\{[\s\S]*?width:\s*44px;[\s\S]*?height:\s*44px;/,
+  );
+  assert.match(
+    editorCss,
+    /\.moveHandle\s*\{[\s\S]*?width:\s*44px;[\s\S]*?height:\s*44px;/,
+  );
 });
 
 test("mobile existing-text editing is focused, accessible, and transactional", () => {
@@ -381,7 +427,7 @@ test("source-text preview repair stays fixed and touch gestures win over moving"
   assert.match(editorSource, /data-edge-y=\{moveHandleVerticalEdge\}/);
   assert.match(
     editorCss,
-    /\.moveHandle::before\s*\{[\s\S]*?inset:\s*-6px;/,
+    /\.moveHandle::before\s*\{[\s\S]*?inset:\s*-2px;/,
   );
   assert.match(
     editorCss,

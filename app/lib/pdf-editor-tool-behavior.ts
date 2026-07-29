@@ -41,9 +41,6 @@ export function isPersistentCreationTool(
 ) {
   return (
     tool === "draw" ||
-    tool === "highlight" ||
-    tool === "whiteout" ||
-    tool === "shape" ||
     (tool === "signature" && drawingSignature)
   );
 }
