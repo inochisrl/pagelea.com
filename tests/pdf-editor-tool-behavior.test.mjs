@@ -63,19 +63,12 @@ test("tap-sized detection includes its boundary and rejects a real drag", () => 
   assert.equal(isTapSizedEditorRect(0.2, 0.04), false);
 });
 
-test("continuous drawing and markup tools stay active", () => {
-  for (const tool of [
-    "draw",
-    "highlight",
-    "whiteout",
-    "shape",
-  ]) {
-    assert.equal(
-      isPersistentCreationTool(tool, false),
-      true,
-      `${tool} should remain active`,
-    );
-  }
+test("freehand tools stay active until the user finishes drawing", () => {
+  assert.equal(
+    isPersistentCreationTool("draw", false),
+    true,
+    "draw should accept multiple strokes",
+  );
   assert.equal(
     isPersistentCreationTool("signature", true),
     true,
@@ -83,8 +76,14 @@ test("continuous drawing and markup tools stay active", () => {
   );
 });
 
-test("placement tools and a non-drawn signature are one-shot", () => {
-  for (const tool of ["text", "image"]) {
+test("rectangles, placement tools, and non-drawn signatures are one-shot", () => {
+  for (const tool of [
+    "highlight",
+    "shape",
+    "whiteout",
+    "text",
+    "image",
+  ]) {
     assert.equal(
       isPersistentCreationTool(tool, false),
       false,

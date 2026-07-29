@@ -8,6 +8,38 @@ and this project follows
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-07-29
+
+### Added
+
+- Turned the Inspector checkmark into a real 44 px Done control and added an
+  equivalent mobile Done action for multi-stroke drawing and signatures.
+- Added Enter as a consistent way to finish the selected element without
+  intercepting text fields, selects, or text-editing dialogs.
+
+### Changed
+
+- Highlight, Shape, and Whiteout now create one element and immediately return
+  to Select with that element ready to move. Draw and drawn signatures remain
+  active for multiple strokes until Done, Enter, Select, or the selected move
+  handle is dragged.
+- Increased the visible mobile move handle from 32 px to 44 px.
+- Treat typed and uploaded signatures as signatures throughout selection,
+  accessibility labels, status messages, and the Inspector.
+
+### Fixed
+
+- Fixed clicking an existing highlight, shape, whiteout, or the empty page
+  creating an unintended duplicate while the user was trying to save or move
+  the previous element.
+- Fixed the most recent freehand or signature stroke looking movable while its
+  creation tool was still active. The page now keeps its drawing cursor and an
+  explicit move handle exits creation without adding another stroke.
+- Fixed the active-tool checkmark appearing actionable while doing nothing.
+- Fixed typed signatures reopening the text editor instead of becoming
+  selectable on mobile, and fixed their placement status remaining stuck on
+  the previous instruction.
+
 ## [0.4.3] - 2026-07-28
 
 ### Added

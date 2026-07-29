@@ -624,6 +624,24 @@
   cursor: pointer;
 }
 
+.inspectorDone {
+  display: inline-grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid #b8d8c9;
+  border-radius: 12px;
+  background: #e8f7ef;
+  color: #087b53;
+  cursor: pointer;
+}
+
+.inspectorDone:hover {
+  border-color: #76bd9b;
+  background: #d8f2e5;
+}
+
 .panelClose {
   width: 44px;
   height: 44px;
@@ -822,6 +840,15 @@
   border-radius: 0;
   font-size: 0.62rem;
   font-weight: 800;
+}
+
+.creationDoneToggle {
+  background: #e8f7ef;
+  color: #087b53;
+}
+
+.creationDoneToggle:hover {
+  background: #d8f2e5;
 }
 
 .toolRail::-webkit-scrollbar {
@@ -1076,6 +1103,11 @@
   touch-action: none;
 }
 
+.workspace:not([data-tool="select"]):not([data-tool="edit-text"])
+  .editorElement {
+  cursor: crosshair;
+}
+
 .editorElement:hover {
   border-color: rgba(45, 111, 232, 0.46);
 }
@@ -1168,11 +1200,11 @@
 .moveHandle {
   position: absolute;
   z-index: 7;
-  top: -18px;
-  right: -18px;
+  top: -24px;
+  right: -24px;
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
   border: 2px solid #fff;
   border-radius: 999px;
   background: #087652;
@@ -1186,7 +1218,7 @@
 .moveHandle::before {
   position: absolute;
   content: "";
-  inset: -6px;
+  inset: -2px;
 }
 
 .moveHandle[data-edge-x="right"] {
@@ -1353,7 +1385,8 @@
 .secondaryButton:focus-visible,
 .addPageButton:focus-visible,
 .panelClose:focus-visible,
-.panelToggle:focus-visible {
+.panelToggle:focus-visible,
+.inspectorDone:focus-visible {
   outline: 3px solid rgba(45, 111, 232, 0.42);
   outline-offset: 2px;
 }

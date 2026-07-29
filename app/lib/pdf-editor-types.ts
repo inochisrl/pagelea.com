@@ -32,6 +32,8 @@ interface EditorElementBase {
   height: number;
   opacity: number;
   rotation?: number;
+  /** Marks typed or uploaded signatures that render through another element type. */
+  purpose?: "signature";
 }
 
 export type EditorFontFamily =
