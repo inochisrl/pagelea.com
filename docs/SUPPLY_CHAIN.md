@@ -66,7 +66,10 @@ The release record should include:
 
 ## Vulnerability handling
 
-- Run full and production-only `npm audit` checks in CI.
+- Run full and production-only `npm audit` checks in CI through
+  `scripts/audit-gate.mjs`. Any advisory fails the gate unless it is listed in
+  that script's `ACCEPTED_ADVISORIES` with a reason and a `reviewBy` date; an
+  expired entry fails again. Use it only when no patched release exists.
 - Use Dependabot for npm and GitHub Actions updates.
 - Run CodeQL on pushes, pull requests, and a weekly schedule.
 - Do not apply automated breaking upgrades without review.
