@@ -87,10 +87,10 @@ jobs:
         run: npm run typecheck
 
       - name: Audit all dependencies
-        run: npm audit --audit-level=low
+        run: node scripts/audit-gate.mjs
 
       - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=low
+        run: node scripts/audit-gate.mjs --omit=dev
 
       - name: Verify dependency licence metadata
         run: npm run licenses:check

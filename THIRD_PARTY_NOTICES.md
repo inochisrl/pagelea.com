@@ -14,11 +14,11 @@ build.
 | --- | ---: | --- |
 | `@pdf-lib/fontkit` | 1.1.1 | MIT |
 | `lucide-react` | 1.26.0 | ISC |
-| `next` | 16.2.11 | MIT |
+| `next` | 16.4.2 | MIT |
 | `pako` | 3.0.1 | MIT AND Zlib |
 | `patch-package` | 8.0.1 | MIT |
 | `pdf-lib` | 1.17.1 | MIT |
-| `pdfjs-dist` | 6.1.200 | Apache-2.0 |
+| `pdfjs-dist` | 6.4.299 | Apache-2.0 |
 | `react` | 19.2.8 | MIT |
 | `react-dom` | 19.2.8 | MIT |
 | `tesseract.js` | 7.0.0 | Apache-2.0 |
