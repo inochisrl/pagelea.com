@@ -437,6 +437,9 @@ test("extracts bold and italic style from a resolved PDF.js font", async () => {
 
   const loadingTask = getDocument({
     data: await sourcePdf.save(),
+    // Mirrors app/lib/pdf-preview.ts: PDF.js 6.4+ only exposes the resolved
+    // font name when fontExtraProperties is enabled.
+    fontExtraProperties: true,
     verbosity: 0,
   });
   const document = await loadingTask.promise;

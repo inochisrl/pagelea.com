@@ -131,6 +131,9 @@ export async function loadPdfPreview(
     data: bytes.slice(),
     cMapPacked: true,
     cMapUrl: "/pdfjs/cmaps/",
+    // PDF.js 6.4+ exposes the resolved font name only with this flag; text
+    // replacement relies on it to match the original font face.
+    fontExtraProperties: true,
     canvasMaxAreaInBytes:
       PDF_SECURITY_LIMITS.maxPdfCanvasAreaInBytes,
     maxImageSize: PDF_SECURITY_LIMITS.maxImagePixels,
