@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import console from "node:console";
 import process from "node:process";
 
 // Advisories accepted temporarily because no patched release exists yet.
